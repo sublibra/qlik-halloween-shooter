@@ -60,16 +60,16 @@ Logs: `journalctl -u qlik-or-treat -f`. Stop it for maintenance: `sudo systemctl
 If there's no sound, add `Environment=SDL_AUDIODRIVER=alsa` to the service.
 If sound goes to HDMI instead of the jack (or vice versa), pick the output with `sudo raspi-config` → System Options → Audio.
 
-## What's in the prototype
+## What's in the game
 
-- Monsters: Spooker, Airbite (dive-bombing bat), Power BOO-I (zig-zag), Table-Ghoul (tank, spits `#REF!` errors), Fivetrain (5-car ghost train, +500 for wrecking all cars)
+- Monsters: Spooker, Airbite (dive-bombing bat), Power BOO-I (zig-zag), SlopSpot (slime that splits when shot),
+  Table-Ghoul (tank, spits `#REF!` errors), Boomoo (exploding pumpkin-cow, chain-blasts its neighbours),
+  Sick-Sense (teleporting eyeball that sneezes slime), Fivetrain (5-car ghost train, +500 for wrecking all cars)
+- Boss for the last 15 s: Inferno-matica, with a health bar and a very slow "Laddar..." bar before each fireball volley
+- Power-ups dropped by kills: Pipeline beam (5 s laser), Insight Shield (absorbs one hit), and from 60 s on
+  Qlik Engine Associative Blast (8 s: shot ghost turns green, associated ones chain-pop, the rest go grey)
+  and Qlik Answers Bot (helper drone that shoots for 10 s). One of each of the last two always drops (62 s, 76.5 s).
 - "NEW SPOOK DETECTED" banner the first time each monster shows up
-- Title/attract screen with top scores, game-over screen with funny ranks
+- High-score initials: LEFT/RIGHT pick a letter, FIRE confirms, or type on a keyboard; FIRE twice quickly skips
+- Title/attract screen with top 10 scores, game-over screen with funny ranks
 - All sounds synthesised in code, spooky drone loop
-
-## Ideas for day 2
-
-- Boss in the last 15 s: Inferno-matica
-- More monsters: SlopSpot, Boomoo, Sick-Sense
-- Power-ups: Associative Blast (green chain reaction), Pipeline beam
-- Initials entry for high scores
