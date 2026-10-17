@@ -2059,7 +2059,8 @@ class Game:
     def update_powers(self, dt):
         p = self.player
         self.drop_cool -= dt
-        self.beam_t = max(0.0, self.beam_t - dt)
+        if self.beam_on:  # the beam only drains while FIRE is held
+            self.beam_t = max(0.0, self.beam_t - dt)
         self.assoc_t = max(0.0, self.assoc_t - dt)
         self.sfx.beam(self.beam_on)
         if self.beam_on:
