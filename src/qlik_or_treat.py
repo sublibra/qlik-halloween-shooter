@@ -1226,6 +1226,9 @@ def main():
     pygame.init()
     flags = pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
     screen = pygame.display.set_mode((W, H), flags)
+    print("pygame %s, SDL %s, video driver %s, display %s" % (
+        pygame.version.ver, ".".join(map(str, pygame.get_sdl_version())),
+        pygame.display.get_driver(), pygame.display.get_desktop_sizes()))
     pygame.display.set_caption("Qlik or Treat")
     pygame.mouse.set_visible(False)
     game = Game(screen, Sfx(), Input())
