@@ -11,6 +11,7 @@ Controls (3 buttons):  LEFT  |  FIRE  |  RIGHT
 Run:
   python3 qlik_or_treat.py            fullscreen (on the Pi)
   python3 qlik_or_treat.py --window   windowed (on your laptop)
+  add --wide for widescreen: fullscreen matches the screen's aspect ratio, windowed is 16:9
 
 Pins can also be overridden with env vars PIN_LEFT, PIN_FIRE, PIN_RIGHT.
 """
@@ -24,7 +25,7 @@ import sys
 import pygame
 
 # --------------------------------------------------------------------- config
-W, H = 800, 600
+W, H = 800, 600  # W grows with --wide (see set_width); H is always 600
 FPS = 60
 FAST_FORWARD = 8  # game speed multiplier while SPACE is held (testing aid)
 ROUND_SECONDS = 90
@@ -63,6 +64,16 @@ RANKS = [
     (10000, "Dataspökjägare"),
     (15000, "Chefsspökjägare"),
 ]
+
+
+def set_width(aspect):
+    """Widen the logical screen to the given aspect ratio (4:3 up to ~16:9)."""
+    global W
+    W = int(clamp(H * aspect, 800, 1100)) // 2 * 2
+
+
+def wide_factor():
+    return W / 800
 
 
 def clamp(v, lo, hi):
@@ -329,12 +340,12 @@ class Background:
         top, bottom = (6, 3, 18), (30, 8, 40)
         for y in range(H):
             pygame.draw.line(self.base, lerp_color(top, bottom, y / H), (0, y), (W, y))
-        self._moon(self.base, 660, 105)
+        self._moon(self.base, W - 140, 105)
         self._graveyard(self.base)
         self.stars = [[random.uniform(0, W), random.uniform(0, H), random.choice((15, 35, 70)),
-                       random.choice((1, 1, 2)), random.randint(90, 220)] for _ in range(90)]
+                       random.choice((1, 1, 2)), random.randint(90, 220)] for _ in range(int(90 * wide_factor()))]
         self.fog = [[random.uniform(-100, W), random.uniform(0, H), random.uniform(8, 18),
-                     random.uniform(-6, 6)] for _ in range(5)]
+                     random.uniform(-6, 6)] for _ in range(round(5 * wide_factor()))]
 
     def _moon(self, s, x, y):
         s.blit(glow(110, (90, 80, 140), 60), (x - 110, y - 110))
@@ -346,7 +357,7 @@ class Background:
         labels = ["RIP", "EXCEL 97", "RIP", "LETARAD", "CSV", "RIP", "MAKRON", "RIP"]
         stone = (38, 28, 54)
         x = 20
-        for label in labels:
+        for label in labels * 2:  # repeat so wide screens are filled too
             w = random.randint(54, 74) if len(label) > 3 else random.randint(38, 50)
             h = random.randint(38, 56)
             rect = pygame.Rect(x, H - h, w, h + 10)
@@ -426,13 +437,14 @@ class Player:
 
     def __init__(self):
         self.x, self.y = W / 2, H - 72
+        self.speed = self.SPEED * wide_factor() ** 0.5  # a bit faster on a wider screen
         self.cool = 0.0
         self.inv = 1.0
         self.tilt = 0.0
 
     def update(self, dt, inp, game):
         d = (1 if inp.right else 0) - (1 if inp.left else 0)
-        self.x = clamp(self.x + d * self.SPEED * dt, 34, W - 34)
+        self.x = clamp(self.x + d * self.speed * dt, 34, W - 34)
         self.tilt += (d - self.tilt) * min(1.0, dt * 10)
         self.cool -= dt
         self.inv = max(0.0, self.inv - dt)
@@ -970,7 +982,7 @@ class Game:
     def update_title(self, dt):
         self.attract_t -= dt
         if self.attract_t <= 0:
-            self.attract_t = random.uniform(0.6, 1.4)
+            self.attract_t = random.uniform(0.6, 1.4) / wide_factor()
             cls = random.choice([Spooker, Spooker, Airbite, PowerBooI])
             self.enemies.append(cls(random.uniform(60, W - 60), -40))
         for e in self.enemies:
@@ -1018,7 +1030,7 @@ class Game:
         self.spawn_t -= dt
         if self.spawn_t > 0:
             return
-        interval = max(0.40, 1.2 - el * 0.009)
+        interval = max(0.40, 1.2 - el * 0.009) / wide_factor()  # same density on wide screens
         self.spawn_t = interval * random.uniform(0.7, 1.3)
         pool = [(Spooker, 5)]
         if el > 6:
@@ -1032,7 +1044,7 @@ class Game:
 
     def spawn_train(self):
         group = {"killed": 0}
-        amp, phase = random.uniform(220, 300), random.uniform(0, 2 * math.pi)
+        amp, phase = random.uniform(220, 300) * wide_factor(), random.uniform(0, 2 * math.pi)
         for i in range(5):
             self.add_enemy(TrainCar(i, group, phase, amp))
         self.sfx.play("whistle")
@@ -1222,16 +1234,26 @@ class Game:
 # ----------------------------------------------------------------------- main
 def main():
     windowed = "--window" in sys.argv
+    wide = "--wide" in sys.argv
     if not windowed and sys.platform.startswith("linux"):
         # Pi 4 + kmsdrm: SDL's default renderer shows a black screen, GLES2 works
         os.environ.setdefault("SDL_RENDER_DRIVER", "opengles2")
     pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()
+    if wide:
+        aspect = 16 / 9
+        if not windowed:
+            try:
+                dw, dh = pygame.display.get_desktop_sizes()[0]
+                aspect = dw / dh
+            except Exception:
+                pass
+        set_width(aspect)
     flags = pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
     screen = pygame.display.set_mode((W, H), flags)
     print("pygame %s, SDL %s, video driver %s, display %s" % (
         pygame.version.ver, ".".join(map(str, pygame.get_sdl_version())),
-        pygame.display.get_driver(), pygame.display.get_desktop_sizes()))
+        pygame.display.get_driver(), pygame.display.get_desktop_sizes()), "logical %dx%d" % (W, H))
     pygame.display.set_caption("Qlik or Treat")
     pygame.mouse.set_visible(False)
     game = Game(screen, Sfx(), Input())

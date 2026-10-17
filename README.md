@@ -25,6 +25,7 @@ uv sync
 uv run src/qlik_or_treat.py --window
 ```
 (or `pip install pygame` and `python3 src/qlik_or_treat.py --window`)
+Add `--wide` for widescreen (16:9 in a window; fullscreen matches the screen's aspect ratio).
 Arrows (or A/D) to move, UP/W/ENTER to fire (hold = auto-fire), hold SPACE to fast-forward (testing), ESC to quit.
 
 Headless smoke test (bot plays a round, screenshots in `shots/`, frame timing):

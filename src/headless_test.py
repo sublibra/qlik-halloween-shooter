@@ -4,6 +4,7 @@ Headless smoke test: plays a full round with a simple bot, no window or audio.
 
   uv run src/headless_test.py            # one round, screenshots in shots/
   uv run src/headless_test.py --rounds 3 --seed 1
+  uv run src/headless_test.py --wide     # 16:9 widescreen
 
 Steps the Game at dt=1/60, saves screenshots at fixed moments, writes high
 scores to a temp file (never the real highscores.json), and reports frame time.
@@ -61,10 +62,13 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--shots", default=os.path.join(ROOT, "shots"))
     ap.add_argument("--no-shots", action="store_true")
+    ap.add_argument("--wide", action="store_true", help="16:9 widescreen")
     args = ap.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
 
+    if args.wide:
+        q.set_width(16 / 9)
     q.SCORE_FILE = os.path.join(tempfile.mkdtemp(), "highscores.json")
     pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()

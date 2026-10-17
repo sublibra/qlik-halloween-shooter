@@ -7,7 +7,7 @@ Day 1 prototype is done (`src/qlik_or_treat.py`, ~1000 lines, single file). Keep
 ## Dev commands
 - Install deps (laptop): `uv sync` (Python 3.11 pinned, matching the Pi's Bookworm python3)
 - Play on laptop: `uv run src/qlik_or_treat.py --window`
-- Headless test (run after every change): `uv run src/headless_test.py [--rounds N] [--seed S] [--no-shots]`
+- Headless test (run after every change): `uv run src/headless_test.py [--rounds N] [--seed S] [--no-shots] [--wide]`
   - bot plays full rounds at dt=1/60, saves screenshots to `shots/` (gitignored), prints score/rank and frame time
   - uses a temp high-score file, never touches `highscores.json`
   - look at the screenshots after visual changes
@@ -30,6 +30,7 @@ Day 1 prototype is done (`src/qlik_or_treat.py`, ~1000 lines, single file). Keep
 ## Tech
 - Python 3 + Pygame (Pi: `python3-pygame` from apt, pygame 2.1.x — avoid APIs newer than that; laptop has 2.6, so be careful). `gpiozero` for buttons, optional.
 - Logical resolution 800×600, `pygame.SCALED | FULLSCREEN` on the Pi; `--window` flag for laptop dev.
+- `--wide` flag: logical width grows to the screen's aspect (window: 16:9 → 1066×600, max 1100), H stays 600. Spawn rate, train amplitude, stars/fog scale with `wide_factor()`; always use `W`, never hardcode 800. Headless: `--wide`.
 - Keyboard fallback: arrows/A/D move, UP/W/ENTER fire (hold = auto-fire), hold SPACE = 8× fast-forward (testing), ESC quit.
 - No asset files: all graphics drawn procedurally, all sounds synthesised at startup with `array` (no numpy).
 - Background loop on mixer channel 0: ambient drone on title/game over, 12.8 s A-minor music loop during rounds (`Sfx.music_loop`).
