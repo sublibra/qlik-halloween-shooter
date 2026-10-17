@@ -1222,6 +1222,9 @@ class Game:
 # ----------------------------------------------------------------------- main
 def main():
     windowed = "--window" in sys.argv
+    if not windowed and sys.platform.startswith("linux"):
+        # Pi 4 + kmsdrm: SDL's default renderer shows a black screen, GLES2 works
+        os.environ.setdefault("SDL_RENDER_DRIVER", "opengles2")
     pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()
     flags = pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
