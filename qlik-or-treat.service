@@ -1,0 +1,14 @@
+[Unit]
+Description=Qlik or Treat arcade game
+After=multi-user.target sound.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/qlik-or-treat
+Environment=SDL_VIDEODRIVER=kmsdrm
+ExecStart=/usr/bin/python3 /home/pi/qlik-or-treat/qlik_or_treat.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

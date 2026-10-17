@@ -1,0 +1,14 @@
+[project]
+name = "qlik-or-treat"
+version = "0.1.0"
+description = "Qlik or Treat - a spooky, silly, Qlik-themed 3-button arcade shooter for Raspberry Pi 4"
+readme = "README.md"
+authors = [
+    { name = "Jonas Hörström", email = "jonas.horstrom@gmail.com" }
+]
+# The Pi runs Raspberry Pi OS python3 + apt python3-pygame (2.1.x); this is only for laptop dev.
+requires-python = ">=3.11"
+dependencies = ["pygame>=2.1"]
+
+[tool.uv]
+package = false
