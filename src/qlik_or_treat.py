@@ -303,7 +303,7 @@ class Input:
                             Button(PIN_RIGHT, pull_up=True, bounce_time=0.01))
             print("GPIO buttons enabled on", PIN_LEFT, PIN_FIRE, PIN_RIGHT)
         except Exception as exc:
-            print("GPIO not available, keyboard only (%s)" % exc.__class__.__name__)
+            print("GPIO not available, keyboard only (%s: %s)" % (exc.__class__.__name__, exc))
         self.left = self.right = self.fire = False
         self.any = self.any_pressed = False
 
