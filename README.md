@@ -11,6 +11,9 @@ A spooky, silly, Qlik-themed 3-button arcade shooter for Raspberry Pi 4.
 Each button: one leg to the GPIO pin, the other leg to any GND. For 3-tab microswitches use **COM** and **NO**.
 No resistors needed (internal pull-ups).
 
+<img width="654" height="471" alt="wiring" src="https://github.com/user-attachments/assets/cae0bb8e-d1d2-4c19-9785-0c607418b2be" />
+
+
 | Button | GPIO   | Physical pin |
 |--------|--------|--------------|
 | LEFT   | GPIO17 | 11           |
