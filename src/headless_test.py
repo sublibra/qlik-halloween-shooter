@@ -2,8 +2,8 @@
 """
 Headless smoke test: plays a full round with a simple bot, no window or audio.
 
-  uv run tools/headless_test.py            # one round, screenshots in shots/
-  uv run tools/headless_test.py --rounds 3 --seed 1
+  uv run src/headless_test.py            # one round, screenshots in shots/
+  uv run src/headless_test.py --rounds 3 --seed 1
 
 Steps the Game at dt=1/60, saves screenshots at fixed moments, writes high
 scores to a temp file (never the real highscores.json), and reports frame time.
@@ -18,8 +18,9 @@ import time
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+SRC = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(SRC)
+sys.path.insert(0, SRC)
 
 import pygame  # noqa: E402
 

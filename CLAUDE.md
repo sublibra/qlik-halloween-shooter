@@ -2,12 +2,12 @@
 
 A spooky, silly, Qlik-themed 3-button arcade shooter for the Qlik company Halloween party.
 Runs on a Raspberry Pi 4 Model B in a home-built wooden cabinet. **Deadline: 2026-10-20** (3 days from 2026-10-17).
-Day 1 prototype is done (`qlik_or_treat.py`, ~1000 lines, single file). Keep it a single file unless it really hurts.
+Day 1 prototype is done (`src/qlik_or_treat.py`, ~1000 lines, single file). Keep it a single file unless it really hurts.
 
 ## Dev commands
 - Install deps (laptop): `uv sync` (Python 3.11 pinned, matching the Pi's Bookworm python3)
-- Play on laptop: `uv run qlik_or_treat.py --window`
-- Headless test (run after every change): `uv run tools/headless_test.py [--rounds N] [--seed S] [--no-shots]`
+- Play on laptop: `uv run src/qlik_or_treat.py --window`
+- Headless test (run after every change): `uv run src/headless_test.py [--rounds N] [--seed S] [--no-shots]`
   - bot plays full rounds at dt=1/60, saves screenshots to `shots/` (gitignored), prints score/rank and frame time
   - uses a temp high-score file, never touches `highscores.json`
   - look at the screenshots after visual changes
@@ -32,7 +32,7 @@ Day 1 prototype is done (`qlik_or_treat.py`, ~1000 lines, single file). Keep it 
 - Keyboard fallback: arrows/A/D move, SPACE fire (hold = auto-fire), ESC quit.
 - No asset files: all graphics drawn procedurally, all sounds synthesised at startup with `array` (no numpy).
 - Must hold 60 fps on the Pi 4. Laptop: ~0.7 ms avg/frame in the headless test (Pi is maybe 5–10× slower).
-- High scores in `highscores.json` next to the script.
+- High scores in `highscores.json` next to the script (`src/` on the laptop, the install dir on the Pi).
 
 ## Game design (current)
 - Vertical shooter. Ship = green Qlik "Q" (ring + tail), moves left/right at the bottom, fires up.
@@ -85,8 +85,8 @@ Also BI-problem monsters if needed: Spreadsheet Zombie, Siloed Data Ghost (flick
 4. Make sure it recovers from anything (service `Restart=always`, no crash on missing audio/GPIO).
 
 ## Files
-- `qlik_or_treat.py` — the game
-- `tools/headless_test.py` — headless bot test + screenshots + frame timing
+- `src/qlik_or_treat.py` — the game
+- `src/headless_test.py` — headless bot test + screenshots + frame timing
 - `README.md` — wiring table, laptop/Pi run, autostart
 - `qlik-or-treat.service` — systemd unit (replace `pi` with the actual username)
 - `pyproject.toml` / `uv.lock` — laptop dev env only; the Pi uses apt packages

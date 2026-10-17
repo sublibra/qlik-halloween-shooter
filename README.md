@@ -22,13 +22,13 @@ Remember to take the HAT off the Pi, it covers the header.
 
 ```
 uv sync
-uv run qlik_or_treat.py --window
+uv run src/qlik_or_treat.py --window
 ```
-(or `pip install pygame` and `python3 qlik_or_treat.py --window`)
+(or `pip install pygame` and `python3 src/qlik_or_treat.py --window`)
 Arrows (or A/D) to move, SPACE to fire (hold = auto-fire), ESC to quit.
 
 Headless smoke test (bot plays a round, screenshots in `shots/`, frame timing):
-`uv run tools/headless_test.py`
+`uv run src/headless_test.py`
 
 ## Run on the Pi
 
@@ -41,7 +41,7 @@ Headless smoke test (bot plays a round, screenshots in `shots/`, frame timing):
 3. Copy the game:
    ```
    mkdir -p ~/qlik-or-treat
-   scp qlik_or_treat.py qlik-or-treat.service <user>@<pi>:~/qlik-or-treat/
+   scp src/qlik_or_treat.py qlik-or-treat.service <user>@<pi>:~/qlik-or-treat/
    ```
 4. Test once from the console (not over SSH-only, it needs the screen):
    `python3 ~/qlik-or-treat/qlik_or_treat.py` — should print `GPIO buttons enabled`.
