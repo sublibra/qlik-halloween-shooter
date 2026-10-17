@@ -6,6 +6,8 @@ Controls (3 buttons):  LEFT  |  FIRE  |  RIGHT
   Keyboard:  arrows or A/D to move, UP/W/ENTER to fire (hold for auto-fire), ESC to quit
              type letters for high-score initials (or press FIRE twice quickly to skip)
              hold SPACE to fast-forward (for testing)
+  Admin keys: L = Swedish/English, N = new game, M = basic/expert mode (everything faster),
+              R = rename the last high score. Language and mode are kept in settings.json.
   GPIO:      one leg of each button to the pin below, other leg to GND
              (internal pull-ups are used, no resistors needed)
 
@@ -37,6 +39,7 @@ MID_BOSS_STAY = 14  # ...and gives up ("Timeout!") if it isn't beaten by then
 BOSS_TIME = 75  # Mega Power BOO-I arrives for the last 15 s
 LATE_POWERUPS = 60  # Associative Blast and Answers Bot only drop from here on
 SCHEDULED_DROPS = ((62, "assoc"), (BOSS_TIME + 1.5, "bot"))  # everyone gets to see them
+EXPERT_SPEED = 1.3  # expert mode: the whole round runs this much faster
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖ"
 
 PIN_LEFT = int(os.environ.get("PIN_LEFT", 17))    # physical pin 11
@@ -45,6 +48,7 @@ PIN_RIGHT = int(os.environ.get("PIN_RIGHT", 22))  # physical pin 15
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCORE_FILE = os.path.join(HERE, "highscores.json")
+SETTINGS_FILE = os.path.join(HERE, "settings.json")  # admin choices: language, expert mode
 
 # -------------------------------------------------------------------- palette
 QLIK_GREEN = (0, 152, 69)
@@ -73,6 +77,90 @@ RANKS = [
     (10000, "Dataspökjägare"),
     (15000, "Chefsspökjägare"),
 ]
+
+# All on-screen text is written in Swedish; with LANG = "en", render() swaps it for these.
+LANG = "sv"
+EN = {
+    # quips and ranks
+    "Datasilo krossad!": "Data silo smashed!", "Dashboard uppdaterad!": "Dashboard refreshed!",
+    "Insikt upplåst!": "Insight unlocked!", "Pipeline rensad!": "Pipeline cleared!",
+    "Associerad & eliminerad!": "Associated & eliminated!", "Bu-ja!": "Boo-yah!",
+    "Spöket under kontroll!": "Ghost under control!",
+    "Aj! Manuell uppdatering!": "Ouch! Manual refresh!", "Datakvalitetsproblem!": "Data quality issue!",
+    "Buu! Skrämd!": "Boo! Scared!", "Vilse i en silo!": "Lost in a silo!",
+    "Vem beställde en CSV?!": "Who ordered a CSV?!",
+    "Kalkylarksöverlevare": "Spreadsheet Survivor", "Dashboardförsvarare": "Dashboard Defender",
+    "Insiktsjägare": "Insight Hunter", "Dataspökjägare": "Data Ghostbuster",
+    "Chefsspökjägare": "Chief Ghostbusting Officer",
+    # power-ups and the Answers Bot
+    "PIPELINE-STRÅLE!": "PIPELINE BEAM!", "SKÖLD": "SHIELD", "INSIKTSSKÖLD!": "INSIGHT SHIELD!",
+    "QLIK ENGINE: ASSOCIATIV SPRÄNGNING!": "QLIK ENGINE: ASSOCIATIVE BLAST!",
+    "QLIK ANSWERS-BOT TILL UNDSÄTTNING!": "QLIK ANSWERS BOT TO THE RESCUE!",
+    "Hej! Jag är Qlik Answers!": "Hi! I'm Qlik Answers!",
+    "Fråga: var är spöket? Svar: DÄR!": "Q: Where's the ghost? A: THERE!",
+    "Enligt dina data: BU!": "According to your data: BOO!",
+    "Källa: din egen dashboard": "Source: your own dashboard",
+    "Ingen hallucination - det ÄR ett spöke!": "Not a hallucination - it IS a ghost!",
+    "Bra fråga! PANG!": "Great question! BANG!", "Svaret är 42... spöken": "The answer is 42... ghosts",
+    "Hej då! Fler frågor?": "Bye! Any more questions?",
+    "Skjut ett spöke - alla associerade poppar!": "Shoot a ghost - everything associated pops!",
+    "VALD!": "SELECTED!", "ASSOCIERAD!": "ASSOCIATED!", "SKÖLDEN HÖLL!": "SHIELD HELD!",
+    # monsters
+    "#REFERENS!": "#REF!", "#SAKNAS!": "#N/A", "#DIVISION/0!": "#DIV/0!", "#VÄRDEFEL!": "#VALUE!",
+    "=SUMMA(A1:C1)": "=SUM(A1:C1)", "=LETARAD(BU)": "=VLOOKUP(BOO)", "=OM(SPÖK;BU)": "=IF(SPOOK,BOO)",
+    "=MEDEL(GRAV)": "=AVERAGE(GRAVE)",
+    "Lurar i ditt semantiska lager": "Lurking in your semantic layer",
+    "Maktgalen och full av BU": "Power-mad and full of BOO",
+    "Biter i mer data än den kan tugga": "Bites off more data than it can chew",
+    "Dra, släpp... och DREGLA": "Drag, drop... and DROOL",
+    "Alla ombord på spökpipelinen!": "All aboard the ghost pipeline!",
+    "Sök efter insikter. Hitta slem.": "Search for insights. Find slime.",
+    "Mu-hahaha! Spränger dina dashboards": "Moo-hahaha! Blows up your dashboards",
+    "Jag ser döda dashboards...": "I see dead dashboards...",
+    "MUUU!": "MOOO!", "ATJO!": "ACHOO!", "A... a...": "Ah... ah...",
+    "TÅGKRASCH!  +500": "TRAIN WRECK!  +500", "NYTT SPÖKE UPPTÄCKT": "NEW SPOOK DETECTED",
+    # bosses
+    "MELLANBOSS!": "MID-BOSS!", "Laddar... var god vänta": "Loading... please wait",
+    "INFERNO-MATICA RADERAD!": "INFERNO-MATICA DELETED!", "Laddning klar: 100%": "Loading complete: 100%",
+    "Timeout! Försöker igen senare...": "Timeout! Retrying later...",
+    "BOSS UPPTÄCKT!": "BOSS DETECTED!", "Nu med 47 nya visualiseringar!": "Now with 47 new visuals!",
+    "POWER BOO-I AVPUBLICERAD!": "POWER BOO-I UNPUBLISHED!",
+    "Uppdatering lyckades: 100%": "Refresh succeeded: 100%",
+    "LICENS KRÄVS": "LICENSE REQUIRED", "MÅTT SAKNAS": "MISSING MEASURE", "PRO KRÄVS": "PRO REQUIRED",
+    "OGILTIG RELATION": "INVALID RELATIONSHIP",
+    "Rapport_FINAL": "Report_FINAL", "Rapport_FINAL_v2": "Report_FINAL_v2",
+    "Kopia av Kopia (3)": "Copy of Copy (3)", "Rapport_FINAL_FINAL": "Report_FINAL_FINAL",
+    "Rapport (1)": "Report (1)", "Ny rapport 7": "New report 7", "Rapport_ANVÄND_DENNA": "Report_USE_THIS_ONE",
+    "UPPGRADERAR TILL PREMIUM-KAPACITET!": "UPGRADING TO PREMIUM CAPACITY!",
+    "Uppdatering misslyckades!": "Refresh failed!", "Uppdaterar datamängd...": "Refreshing dataset...",
+    # HUD and screens
+    "POÄNG": "SCORE", "REKORD": "BEST", "STRÅLE": "BEAM", "ASSOCIATIV": "ASSOC.",
+    "Det spökar i din data. Vi kan hjälpa till.": "Your data is haunted. We can help.",
+    "TRYCK PÅ VALFRI KNAPP": "PRESS ANY BUTTON",
+    "VÄNSTER / HÖGER för att styra   -   MITTEN för att skjuta": "LEFT / RIGHT to steer   -   MIDDLE to shoot",
+    "TOPPLISTA": "HIGH SCORES", "Inga offer än...": "No victims yet...",
+    "NYTT REKORD!": "NEW HIGH SCORE!", "DU KOM MED PÅ TOPPLISTAN!": "YOU MADE THE TOP 10!",
+    "Rang:": "Rank:", "SKRIV DINA INITIALER": "ENTER YOUR INITIALS",
+    "VÄNSTER / HÖGER: byt bokstav     MITTEN: välj": "LEFT / RIGHT: change letter     MIDDLE: select",
+    "...eller skriv på tangentbordet": "...or type on the keyboard",
+    "Tryck MITTEN två gånger snabbt för att hoppa över": "Press MIDDLE twice quickly to skip",
+    "TIDEN ÄR UTE!": "TIME'S UP!",
+    "Monster nedskjutna: %d     Gånger skrämd: %d": "Monsters zapped: %d     Times scared: %d",
+    "%s besegrad!": "%s defeated!", "%s besegrade!": "%s defeated!",
+    "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN": "PRESS ANY BUTTON TO PLAY AGAIN",
+    # admin
+    "EXPERTLÄGE": "EXPERT MODE", "BASLÄGE": "BASIC MODE", "BYT NAMN": "RENAME",
+    "Inget resultat att byta namn på": "No score to rename",
+}
+
+
+def tr(text):
+    return EN.get(text, text) if LANG == "en" else text
+
+
+def set_lang(lang):
+    global LANG
+    LANG = "en" if lang == "en" else "sv"
 
 
 def set_width(aspect):
@@ -125,6 +213,22 @@ def save_scores(scores):
         print("Could not save scores:", exc)
 
 
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            return dict(json.load(f))
+    except Exception:
+        return {}
+
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f)
+    except Exception as exc:
+        print("Could not save settings:", exc)
+
+
 # ---------------------------------------------------------------- text / glow
 _fonts, _text_cache, _glows = {}, {}, {}
 
@@ -136,6 +240,7 @@ def font(size):
 
 
 def render(text, size, color):
+    text = tr(text)  # every on-screen string passes through here, so this is the one place to translate
     key = (text, size, color)
     img = _text_cache.get(key)
     if img is None:
@@ -1422,7 +1527,7 @@ def draw_loading(s, x, y, charge, text, color):
     pygame.draw.rect(s, (20, 10, 20), (bx - 2, y - 2, bw + 4, 18))
     pygame.draw.rect(s, color, (bx, y, int(bw * min(charge, 0.99)), 14))
     pygame.draw.rect(s, WHITE, (bx - 2, y - 2, bw + 4, 18), 2)
-    draw_text(s, "%s  %d%%" % (text, pct), 22, WHITE, center=(x, y + 30))
+    draw_text(s, "%s  %d%%" % (tr(text), pct), 22, WHITE, center=(x, y + 30))
 
 
 class Infernomatica(Enemy):
@@ -1667,6 +1772,11 @@ class Game:
         self.boss_killed, self.name = [], ""
         self.attract_t = 0.0
         self.new_best, self.rank = False, ""
+        self.toast_msg = None
+        self.last_entry = self.renaming = None  # the most recently saved high score, for R (rename)
+        settings = load_settings()
+        self.expert = bool(settings.get("expert", False))
+        set_lang(settings.get("lang", "sv"))
         self.state, self.state_t = "title", 0.0
         self.sfx.start_drone()
 
@@ -1712,19 +1822,65 @@ class Game:
         self.new_best = self.score > 0 and self.score > best
         self.rank = rank_for(self.score)
         if self.score > 0 and (len(self.scores) < 10 or self.score > self.scores[-1][0]):
-            self.letters, self.cur, self.last_fire, self.rep, self.idle = [], 0, -9.0, 0.0, 0.0
-            self.set_state("initials")
+            self.begin_initials()
         else:
             self.set_state("over")
 
+    def begin_initials(self, renaming=None):
+        self.renaming = renaming
+        self.letters, self.cur, self.last_fire, self.rep, self.idle = [], 0, -9.0, 0.0, 0.0
+        self.set_state("initials")
+
     def save_score(self, name):
+        if self.renaming:
+            # admin rename: swap the name on the same entry, then show the list
+            i = next((i for i, e in enumerate(self.scores) if e is self.renaming), None)
+            if i is not None:
+                self.scores[i] = self.last_entry = (self.renaming[0], name)
+                save_scores(self.scores)
+            self.renaming = None
+            self.set_state("title")
+            return
         self.name = name
-        self.scores = sorted(self.scores + [(self.score, name)], key=lambda s: -s[0])[:10]
+        self.last_entry = (self.score, name)
+        self.scores = sorted(self.scores + [self.last_entry], key=lambda s: -s[0])[:10]
         save_scores(self.scores)
         self.set_state("over")
 
+    # ---- admin keys (keyboard only, hidden from players)
+    def admin_key(self, key):
+        """L = language, N = new game, M = basic/expert mode, R = rename the last high score.
+        Ignored while initials are being typed, since those are letters too."""
+        if self.inp.text_mode:
+            return
+        if key == pygame.K_l:
+            set_lang("sv" if LANG == "en" else "en")
+            self.save_settings()
+            self.toast("SPRÅK: SVENSKA" if LANG == "sv" else "LANGUAGE: ENGLISH", QLIK_LIGHT)
+        elif key == pygame.K_m:
+            self.expert = not self.expert
+            self.save_settings()
+            self.toast("EXPERTLÄGE" if self.expert else "BASLÄGE", RED if self.expert else QLIK_LIGHT)
+        elif key == pygame.K_n:
+            self.start_round()  # a round in progress is simply thrown away
+        elif key == pygame.K_r:
+            if self.state == "playing":
+                return  # don't throw away a round in progress
+            if any(e is self.last_entry for e in self.scores):
+                self.begin_initials(renaming=self.last_entry)
+            else:
+                self.toast("Inget resultat att byta namn på", GREY)
+
+    def save_settings(self):
+        save_settings({"lang": LANG, "expert": self.expert})
+
+    def toast(self, text, color):
+        self.toast_msg = [text, color, 2.0]  # drawn on top of everything, see draw_toast
+
     # ---- update
     def update(self, dt):
+        if self.expert and self.state == "playing":
+            dt *= EXPERT_SPEED  # everything speeds up, the round clock too
         self.clock += dt
         self.state_t += dt
         self.bg.update(dt)
@@ -1759,8 +1915,12 @@ class Game:
         if self.state_t < 1.0:  # ignore button mashing left over from the round
             return
         self.idle += dt
-        if self.idle > 25:  # walked away: keep whatever was entered
-            self.save_score("".join(self.letters))
+        if self.idle > 25:  # walked away: keep whatever was entered (a rename is cancelled)
+            if self.renaming:
+                self.renaming = None
+                self.set_state("title")
+            else:
+                self.save_score("".join(self.letters))
             return
         for ch in inp.typed:
             self.idle = 0.0
@@ -1899,7 +2059,8 @@ class Game:
     def update_powers(self, dt):
         p = self.player
         self.drop_cool -= dt
-        self.beam_t = max(0.0, self.beam_t - dt)
+        if self.beam_on:  # the beam only drains while FIRE is held
+            self.beam_t = max(0.0, self.beam_t - dt)
         self.assoc_t = max(0.0, self.assoc_t - dt)
         self.sfx.beam(self.beam_on)
         if self.beam_on:
@@ -2087,7 +2248,7 @@ class Game:
             for bl in self.blobs:
                 bl.dead = True
                 self.explode(bl.x, bl.y, colors=[GREY], n=6, speed=80)
-            self.add_float(W / 2, H / 2 - 40, "%s  +%d" % (e.kill_text, e.points), YELLOW, 46, life=3.0)
+            self.add_float(W / 2, H / 2 - 40, "%s  +%d" % (tr(e.kill_text), e.points), YELLOW, 46, life=3.0)
             self.add_float(W / 2, H / 2 + 10, e.kill_sub, WHITE, 30, life=3.0)
             self.sfx.play("roar")
             self.sfx.play("bonus")
@@ -2145,6 +2306,10 @@ class Game:
             r[2] += r[3] * dt
             r[4] -= dt
         self.rings = [r for r in self.rings if r[4] > 0]
+        if self.toast_msg:
+            self.toast_msg[2] -= dt
+            if self.toast_msg[2] <= 0:
+                self.toast_msg = None
         if self.banner:
             self.banner[3] -= dt
             if self.banner[3] <= 0:
@@ -2198,12 +2363,22 @@ class Game:
             self.draw_initials(w)
         else:
             self.draw_over(w)
+        if self.toast_msg:
+            self.draw_toast(w)
         ox = oy = 0
         if self.shake > 0:
             ox = int(random.uniform(-self.shake, self.shake))
             oy = int(random.uniform(-self.shake, self.shake))
         self.screen.fill((0, 0, 0))
         self.screen.blit(w, (ox, oy))
+
+    def draw_toast(self, w):
+        text, col, _ = self.toast_msg
+        img = render(text, 48, col)
+        box = img.get_rect(center=(W // 2, H // 2)).inflate(48, 28)
+        pygame.draw.rect(w, (15, 8, 25), box, border_radius=12)
+        pygame.draw.rect(w, col, box, 3, border_radius=12)
+        w.blit(img, img.get_rect(center=box.center))
 
     def draw_beam(self, w):
         p = self.player
@@ -2218,9 +2393,9 @@ class Game:
             pygame.draw.circle(w, WHITE, (x + random.randint(-hw - 8, hw + 8), int(sy)), 2)
 
     def draw_hud(self, w):
-        draw_text(w, "POÄNG %d" % self.score, 36, WHITE, topleft=(16, 12))
+        draw_text(w, "%s %d" % (tr("POÄNG"), self.score), 36, WHITE, topleft=(16, 12))
         best = max(self.scores[0][0] if self.scores else 0, self.score)
-        draw_text(w, "REKORD %d" % best, 36, QLIK_LIGHT, topright=(W - 16, 12))
+        draw_text(w, "%s %d" % (tr("REKORD"), best), 36, QLIK_LIGHT, topright=(W - 16, 12))
         remaining = max(0.0, ROUND_SECONDS - self.elapsed)
         sec = math.ceil(remaining)
         if remaining <= 10:
@@ -2240,6 +2415,8 @@ class Game:
                 y += 22
         if self.shield:
             draw_text(w, "SKÖLD", 22, YELLOW, topleft=(16, y))
+        if self.expert:
+            draw_text(w, "EXPERT", 22, RED, topright=(W - 16, 44))
         if self.boss and not self.boss.dead and self.boss.active():
             b = self.boss
             bw = 340
@@ -2261,6 +2438,8 @@ class Game:
             pygame.draw.line(w, QLIK_GREEN, (sx, sy), (sx, sy + length), 4)
             pygame.draw.circle(w, QLIK_GREEN, (sx, int(sy + length)), 4)
         w.blit(self.title_img, rect)
+        if self.expert:
+            draw_text(w, "EXPERTLÄGE", 30, RED, center=(W / 2, 222))
         draw_text(w, "Det spökar i din data. Vi kan hjälpa till.", 32, WHITE, center=(W / 2, 255))
         if int(self.clock * 2) % 2 == 0:
             draw_text(w, "TRYCK PÅ VALFRI KNAPP", 44, YELLOW, center=(W / 2, 320))
@@ -2278,12 +2457,15 @@ class Game:
             draw_text(w, str(s), 28, c, topright=(int(cx + 110), y))
 
     def draw_initials(self, w):
-        if self.new_best:
+        score = self.renaming[0] if self.renaming else self.score
+        if self.renaming:
+            draw_text(w, "%s: %s" % (tr("BYT NAMN"), self.renaming[1] or "---"), 72, RED, center=(W / 2, 80))
+        elif self.new_best:
             draw_text(w, "NYTT REKORD!", 72, YELLOW, center=(W / 2, 80))
         else:
             draw_text(w, "DU KOM MED PÅ TOPPLISTAN!", 60, ORANGE, center=(W / 2, 80))
-        draw_text(w, str(self.score), 90, WHITE, center=(W / 2, 160))
-        draw_text(w, "Rang: " + self.rank, 36, QLIK_LIGHT, center=(W / 2, 222))
+        draw_text(w, str(score), 90, WHITE, center=(W / 2, 160))
+        draw_text(w, tr("Rang:") + " " + tr(rank_for(score)), 36, QLIK_LIGHT, center=(W / 2, 222))
         draw_text(w, "SKRIV DINA INITIALER", 36, WHITE, center=(W / 2, 278))
         n = len(self.letters)
         for i in range(3):
@@ -2308,15 +2490,15 @@ class Game:
     def draw_over(self, w):
         draw_text(w, "TIDEN ÄR UTE!", 84, ORANGE, center=(W / 2, 130))
         draw_text(w, str(self.score), 120, WHITE, center=(W / 2, 235))
-        draw_text(w, "POÄNG" + ("  -  " + self.name if self.name else ""), 30, GREY, center=(W / 2, 300))
-        draw_text(w, "Rang: " + self.rank, 42, QLIK_LIGHT, center=(W / 2, 355))
+        draw_text(w, tr("POÄNG") + ("  -  " + self.name if self.name else ""), 30, GREY, center=(W / 2, 300))
+        draw_text(w, tr("Rang:") + " " + tr(self.rank), 42, QLIK_LIGHT, center=(W / 2, 355))
         if self.new_best and int(self.clock * 3) % 2 == 0:
             draw_text(w, "NYTT REKORD!", 52, YELLOW, center=(W / 2, 410))
-        draw_text(w, "Monster nedskjutna: %d     Gånger skrämd: %d" % (self.kills, self.hits), 28, WHITE,
+        draw_text(w, tr("Monster nedskjutna: %d     Gånger skrämd: %d") % (self.kills, self.hits), 28, WHITE,
                   center=(W / 2, 458))
         if self.boss_killed:
-            done = " besegrade!" if len(self.boss_killed) > 1 else " besegrad!"
-            draw_text(w, " + ".join(self.boss_killed) + done, 28, ORANGE, center=(W / 2, 486))
+            done = tr("%s besegrade!" if len(self.boss_killed) > 1 else "%s besegrad!")
+            draw_text(w, done % " + ".join(self.boss_killed), 28, ORANGE, center=(W / 2, 486))
         if self.state_t > 3.0 and int(self.clock * 2) % 2 == 0:
             draw_text(w, "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN", 32, YELLOW, center=(W / 2, 530))
 
@@ -2355,6 +2537,7 @@ def main():
                 pygame.quit()
                 return
             if e.type == pygame.KEYDOWN:
+                game.admin_key(e.key)
                 game.inp.key_down(e)
         game.inp.poll()
         steps = FAST_FORWARD if pygame.key.get_pressed()[pygame.K_SPACE] else 1

@@ -5,9 +5,11 @@ Headless smoke test: plays a full round with a simple bot, no window or audio.
   uv run src/headless_test.py            # one round, screenshots in shots/
   uv run src/headless_test.py --rounds 3 --seed 1
   uv run src/headless_test.py --wide     # 16:9 widescreen
+  uv run src/headless_test.py --english --expert
 
 Steps the Game at dt=1/60, saves screenshots at fixed moments, writes high
-scores to a temp file (never the real highscores.json), and reports frame time.
+scores and settings to a temp dir (never the real highscores.json / settings.json),
+exercises the admin keys, and reports frame time.
 """
 import argparse
 import os
@@ -61,18 +63,28 @@ def main():
     ap.add_argument("--shots", default=os.path.join(ROOT, "shots"))
     ap.add_argument("--no-shots", action="store_true")
     ap.add_argument("--wide", action="store_true", help="16:9 widescreen")
+    ap.add_argument("--english", action="store_true", help="English text (admin key L)")
+    ap.add_argument("--expert", action="store_true", help="expert mode (admin key M)")
     args = ap.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
 
     if args.wide:
         q.set_width(16 / 9)
-    q.SCORE_FILE = os.path.join(tempfile.mkdtemp(), "highscores.json")
+    tmp = tempfile.mkdtemp()
+    q.SCORE_FILE = os.path.join(tmp, "highscores.json")
+    q.SETTINGS_FILE = os.path.join(tmp, "settings.json")
     pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()
     screen = pygame.display.set_mode((q.W, q.H))
     inp = q.Controls()
     game = q.Game(screen, q.Sfx(), inp)
+    if args.english:
+        game.admin_key(pygame.K_l)
+    if args.expert:
+        game.admin_key(pygame.K_m)
+    assert q.LANG == ("en" if args.english else "sv") and game.expert == args.expert
+    assert q.load_settings() == ({"lang": q.LANG, "expert": game.expert} if args.english or args.expert else {})
     if not args.no_shots:
         os.makedirs(args.shots, exist_ok=True)
 
@@ -135,6 +147,29 @@ def main():
             step()
 
     print("top 10:", game.scores)
+
+    # admin: rename the last high score, then N starts a round and N again restarts it
+    last = game.last_entry
+    if last:
+        game.admin_key(pygame.K_r)
+        assert game.state == "initials" and game.renaming is last
+        for _ in range(70):
+            inp.set()
+            step()
+        shot("rename")
+        inp.typed.extend("ZZZ")
+        step()
+        assert game.state == "title" and (last[0], "ZZZ") in game.scores, game.scores
+        assert q.load_scores() == game.scores
+        print("renamed", last, "->", game.last_entry)
+    game.admin_key(pygame.K_n)
+    assert game.state == "playing"
+    for _ in range(120):
+        bot(game, inp)
+        step()
+    game.admin_key(pygame.K_n)
+    assert game.state == "playing" and game.elapsed == 0
+    game.set_state("title")
     for _ in range(int(13 * 60)):  # back to the title screen with initials
         inp.set()
         step()

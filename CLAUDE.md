@@ -32,6 +32,8 @@ Day 1 prototype and day 2 content are done (`src/qlik_or_treat.py`, ~1900 lines,
 - Logical resolution 800×600, `pygame.SCALED | FULLSCREEN` on the Pi; `--window` flag for laptop dev.
 - `--wide` flag: logical width grows to the screen's aspect (window: 16:9 → 1066×600, max 1100), H stays 600. Spawn rate, train amplitude, stars/fog scale with `wide_factor()`; always use `W`, never hardcode 800. Headless: `--wide`.
 - Keyboard fallback: arrows/A/D move, UP/W/ENTER fire (hold = auto-fire), hold SPACE = 8× fast-forward (testing), ESC quit.
+- Admin keys (`Game.admin_key`, ignored while typing initials): L = Swedish/English, N = new game, M = expert mode (`EXPERT_SPEED` scales dt during rounds), R = rename the last saved high score. Lang + mode persist in `settings.json`.
+- Translation: write on-screen text in Swedish; `render()` passes everything through `tr()`, which looks up `EN`. Add every new string to `EN`. Composite strings: translate the template/parts before formatting.
 - Input: `Controls` holds held state + press edges (`*_pressed`) + typed letters; `Input(Controls)` adds keyboard/GPIO polling. Headless test uses `Controls` directly.
 - No asset files: all graphics drawn procedurally, all sounds synthesised at startup with `array` (no numpy).
 - Background loop on mixer channel 0: ambient drone on title/game over, 12.8 s A-minor music loop during rounds (`Sfx.music_loop`). Channel 1: Pipeline beam hum.
