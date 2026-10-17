@@ -3,7 +3,8 @@
 QLIK OR TREAT  -  a spooky, silly, Qlik-themed arcade shooter for Raspberry Pi.
 
 Controls (3 buttons):  LEFT  |  FIRE  |  RIGHT
-  Keyboard:  arrows or A/D to move, SPACE to fire (hold for auto-fire), ESC to quit
+  Keyboard:  arrows or A/D to move, UP/W/ENTER to fire (hold for auto-fire), ESC to quit
+             hold SPACE to fast-forward (for testing)
   GPIO:      one leg of each button to the pin below, other leg to GND
              (internal pull-ups are used, no resistors needed)
 
@@ -25,6 +26,7 @@ import pygame
 # --------------------------------------------------------------------- config
 W, H = 800, 600
 FPS = 60
+FAST_FORWARD = 8  # game speed multiplier while SPACE is held (testing aid)
 ROUND_SECONDS = 90
 HIT_PENALTY = 100
 TRAIN_TIMES = (35, 65)  # seconds into the round when the Fivetrain arrives
@@ -47,19 +49,19 @@ YELLOW = (242, 200, 17)
 CONFETTI = [QLIK_GREEN, QLIK_LIGHT, (255, 180, 0), (230, 60, 130), (60, 160, 255), ORANGE]
 
 KILL_QUIPS = [
-    "Data unsiloed!", "Dashboard refreshed!", "Insight unlocked!",
-    "Pipeline cleaned!", "Associated & eliminated!", "Boo-yah!", "Ghost governed!",
+    "Datasilo krossad!", "Dashboard uppdaterad!", "Insikt upplåst!",
+    "Pipeline rensad!", "Associerad & eliminerad!", "Bu-ja!", "Spöket under kontroll!",
 ]
 HIT_QUIPS = [
-    "Ouch! Manual refresh!", "Data quality issue!", "Spooked!",
-    "Lost in a silo!", "Who ordered a CSV?!",
+    "Aj! Manuell uppdatering!", "Datakvalitetsproblem!", "Buu! Skrämd!",
+    "Vilse i en silo!", "Vem beställde en CSV?!",
 ]
 RANKS = [
-    (0, "Spreadsheet Survivor"),
-    (2500, "Dashboard Defender"),
-    (6000, "Insight Hunter"),
-    (10000, "Data Ghostbuster"),
-    (15000, "Chief Ghostbusting Officer"),
+    (0, "Kalkylarksöverlevare"),
+    (2500, "Dashboardförsvarare"),
+    (6000, "Insiktsjägare"),
+    (10000, "Dataspökjägare"),
+    (15000, "Chefsspökjägare"),
 ]
 
 
@@ -214,11 +216,48 @@ class Sfx:
             out.append(int(s / 2.4 * 0.22 * 32767))
         return out
 
+    def music_loop(self):
+        """Spooky-disco tune in A minor: octave-bouncing bass, square lead, hi-hats.
+        Built by concatenating cached notes (fast enough for the Pi at startup)."""
+        step = 0.2  # one eighth note at 150 BPM; 64 steps = 12.8 s loop
+        # MIDI note numbers, one per eighth, 0 = rest
+        lead = [57, 60, 64, 69, 68, 64, 60, 64,   53, 57, 60, 65, 64, 60, 57, 60,
+                62, 65, 69, 65, 62, 65, 64, 62,   64, 68, 71, 68, 64, 0, 62, 59,
+                57, 60, 64, 69, 68, 64, 60, 64,   53, 57, 60, 65, 64, 60, 57, 60,
+                62, 65, 69, 72, 71, 69, 68, 71,   69, 0, 64, 0, 57, 0, 0, 0]
+        lead = [n + 12 if n else 0 for n in lead]
+        roots = [45, 41, 38, 40, 45, 41, 38, 40]  # Am F Dm E, twice
+        bass = [r + (12 if i % 2 else 0) for r in roots for i in range(8)]
+        n = int(self.rate * step)
+        cache = {}
+
+        def note(m, wave, vol):
+            key = (m, wave, vol)
+            if key not in cache:
+                if m:
+                    f = 440 * 2 ** ((m - 69) / 12)
+                    cache[key] = self.tone(f, f, step, wave, vol, attack=0.004)
+                else:
+                    cache[key] = array.array("h", bytes(2 * n))
+            return cache[key]
+
+        tracks = []
+        for part, wave, vol in ((lead, "square", 0.09), (bass, "tri", 0.26)):
+            tr = array.array("h")
+            for m in part:
+                tr.extend(note(m, wave, vol))
+            tracks.append(tr)
+        hat = self.tone(8000, 8000, 0.03, "sine", 0.05, noise=1.0)
+        hat.extend(array.array("h", bytes(2 * (n - len(hat)))))
+        tracks.append(note(0, "", 0) + hat)  # hat on every off-beat
+        tracks[2] *= len(lead) // 2
+        return array.array("h", map(sum, zip(*tracks)))
+
     def _sound(self, samples):
         if self.channels > 1:
-            st = array.array("h")
-            for v in samples:
-                st.extend([v] * self.channels)
+            st = array.array("h", bytes(2 * len(samples) * self.channels))
+            for c in range(self.channels):
+                st[c::self.channels] = samples
             samples = st
         return pygame.mixer.Sound(buffer=samples.tobytes())
 
@@ -235,14 +274,22 @@ class Sfx:
         self.sounds["over"] = S(self.seq([392, 330, 262, 196, 131], 0.22, "saw", 0.22, vib=0.03))
         self.sounds["bonus"] = S(self.seq([523, 659, 784, 1047, 1319], 0.07, "square", 0.15))
         self.drone = S(self.drone_loop())
+        self.music = S(self.music_loop())
 
     def play(self, name):
         if self.enabled and name in self.sounds:
             self.sounds[name].play()
 
+    def _loop(self, snd):
+        # channel 0 is reserved for the background loop: drone on title, music in rounds
+        if self.enabled and snd:
+            pygame.mixer.Channel(0).play(snd, loops=-1, fade_ms=400)
+
     def start_drone(self):
-        if self.enabled and self.drone:
-            pygame.mixer.Channel(0).play(self.drone, loops=-1)
+        self._loop(self.drone)
+
+    def start_music(self):
+        self._loop(self.music)
 
 
 # ---------------------------------------------------------------------- input
@@ -264,7 +311,7 @@ class Input:
         k = pygame.key.get_pressed()
         l = k[pygame.K_LEFT] or k[pygame.K_a]
         r = k[pygame.K_RIGHT] or k[pygame.K_d]
-        f = k[pygame.K_SPACE] or k[pygame.K_UP] or k[pygame.K_w] or k[pygame.K_RETURN]
+        f = k[pygame.K_UP] or k[pygame.K_w] or k[pygame.K_RETURN]
         if self.buttons:
             l = l or self.buttons[0].is_pressed
             f = f or self.buttons[1].is_pressed
@@ -296,7 +343,7 @@ class Background:
             pygame.draw.circle(s, (195, 195, 175), (x + cx, y + cy), r)
 
     def _graveyard(self, s):
-        labels = ["RIP", "EXCEL 97", "RIP", "VLOOKUP", "CSV", "RIP", "MACROS", "RIP"]
+        labels = ["RIP", "EXCEL 97", "RIP", "LETARAD", "CSV", "RIP", "MAKRON", "RIP"]
         stone = (38, 28, 54)
         x = 20
         for label in labels:
@@ -428,7 +475,7 @@ class Bullet:
 
 class ErrorBlob:
     """Spreadsheet errors spat out by the Table-Ghoul."""
-    TEXTS = ["#REF!", "#N/A", "#DIV/0!", "#VALUE!"]
+    TEXTS = ["#REFERENS!", "#SAKNAS!", "#DIVISION/0!", "#VÄRDEFEL!"]  # Swedish Excel
 
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -502,7 +549,7 @@ class Enemy:
 
 class Spooker(Enemy):
     name = "SPOOKER"
-    tagline = "Lurking in your semantic layer"
+    tagline = "Lurar i ditt semantiska lager"
     points = 100
     color = (205, 220, 255)
 
@@ -523,7 +570,7 @@ class Spooker(Enemy):
 
 class PowerBooI(Spooker):
     name = "POWER BOO-I"
-    tagline = "Power hungry and full of BOO"
+    tagline = "Maktgalen och full av BU"
     points = 150
     color = YELLOW
 
@@ -539,7 +586,7 @@ class PowerBooI(Spooker):
 
 class Airbite(Enemy):
     name = "AIRBITE"
-    tagline = "Bites off more data than it can chew"
+    tagline = "Biter i mer data än den kan tugga"
     r = 18
     points = 150
 
@@ -591,58 +638,217 @@ class Airbite(Enemy):
 
 
 class TableGhoul(Enemy):
+    """A walking haunted spreadsheet: coin eyes, zigzag mouth, robot legs."""
     name = "TABLE-GHOUL"
-    tagline = "Drag, drop... and DROOL"
+    tagline = "Dra, släpp... och DREGLA"
     hp = 4
-    r = 34
+    r = 44
     points = 400
+    CHARGE = 0.7  # seconds of warning (siren, formula, gaping mouth) before it spits
+    FORMULAS = ["=SUMMA(A1:C1)", "=LETARAD(BU)", "=OM(SPÖK;BU)", "=PIVOT(???)", "=MEDEL(GRAV)"]
+    _sprites = None
+
+    @classmethod
+    def sprites(cls):
+        """Static parts, drawn once: cabinet + headers, gridlines, scrolling 'matrix' rain."""
+        if cls._sprites is None:
+            base = pygame.Surface((106, 84), pygame.SRCALPHA)
+            pygame.draw.rect(base, (45, 100, 180), (0, 0, 106, 84), border_radius=7)
+            pygame.draw.line(base, (110, 170, 240), (7, 2), (98, 2), 2)
+            pygame.draw.rect(base, (14, 30, 66), (6, 6, 94, 72))
+            pygame.draw.rect(base, (30, 64, 120), (6, 6, 94, 12))
+            pygame.draw.rect(base, (30, 64, 120), (6, 6, 13, 72))
+            pygame.draw.rect(base, (20, 45, 95), (0, 0, 106, 84), 3, border_radius=7)
+            grid = pygame.Surface((106, 84), pygame.SRCALPHA)
+            for i in range(4):
+                pygame.draw.line(grid, (75, 125, 205), (19 + 27 * i, 6), (19 + 27 * i, 77))
+            for j in range(4):
+                pygame.draw.line(grid, (75, 125, 205), (6, 18 + 20 * j), (99, 18 + 20 * j))
+            pygame.draw.rect(grid, (110, 160, 235), (6, 6, 94, 72), 1)
+            for i, ch in enumerate("ABC"):
+                img = font(17).render(ch, True, (225, 235, 255))
+                grid.blit(img, img.get_rect(center=(33 + 27 * i, 13)))
+            for j, ch in enumerate("123"):
+                img = font(17).render(ch, True, (225, 235, 255))
+                grid.blit(img, img.get_rect(center=(13, 29 + 20 * j)))
+            rain = pygame.Surface((81, 120), pygame.SRCALPHA)  # 60 px tall, stored twice to wrap
+            rng = random.Random(7)
+            for cx in range(2, 81, 4):
+                for _ in range(rng.randint(1, 3)):
+                    y0, ln = rng.randint(0, 59), rng.randint(4, 12)
+                    for k in range(0, ln, 2):
+                        a = 40 + 90 * k // ln
+                        for wrap in (0, 60):
+                            rain.set_at((cx, (y0 + k) % 60 + wrap), (70, 210, 170, a))
+            cls._sprites = base, grid, rain
+        return cls._sprites
 
     def __init__(self, x, y):
         super().__init__(x, y)
         self.bx = clamp(x, 100, W - 100)
         self.shoot = random.uniform(1.5, 2.5)
+        self.charge = self.gape = 0.0
+        self.formula = random.choice(self.FORMULAS)
+        self.look = 0.0
+        self.spin, self.spin_wait = 0.0, random.uniform(1, 3)
+        self.sel, self.sel_to, self.sel_wait = [0.0, 0.0], (0, 0), 1.5
 
     def move(self, dt, game):
         self.y += 40 * dt
         self.x = self.bx + math.sin(self.t * 0.8) * 60
+        # idle animation: coin eyes flip now and then, cell selection hops around
+        self.spin = max(0.0, self.spin - dt)
+        self.spin_wait -= dt
+        if self.spin_wait <= 0:
+            self.spin, self.spin_wait = 0.4, random.uniform(2, 4)
+        self.sel_wait -= dt
+        if self.sel_wait <= 0:
+            self.sel_to = random.choice([(0, 0), (1, 0), (2, 0), (0, 1), (2, 1)])
+            self.sel_wait = random.uniform(1.2, 2.5)
+        tx, ty = (1, 1) if self.charge > 0 else self.sel_to
+        k = min(1.0, dt * 12)
+        self.sel[0] += (tx - self.sel[0]) * k
+        self.sel[1] += (ty - self.sel[1]) * k
+        self.gape = max(0.0, self.gape - dt)
+        if game.player and game.state == "playing":
+            self.look = clamp((game.player.x - self.x) / 150, -1, 1)
         if game.state != "playing":
             return
         self.shoot -= dt
-        if self.shoot <= 0 and 30 < self.y < H - 220:
-            game.blobs.append(ErrorBlob(self.x, self.y + 34))
+        in_range = 30 < self.y < H - 220
+        self.charge = clamp(1 - self.shoot / self.CHARGE, 0, 1) if in_range else 0.0
+        if self.shoot <= 0 and in_range:
+            game.blobs.append(ErrorBlob(self.x, self.y + 32))
             self.shoot = random.uniform(2.2, 3.4)
+            self.charge, self.gape = 0.0, 0.3
+            self.formula = random.choice(self.FORMULAS)
 
     def draw(self, s):
+        base, grid, rain = self.sprites()
         x, y = int(self.x), int(self.y)
+        ox, oy = x - 53, y - 42
         fl = self.flash > 0
-        w, h = 68, 50
-        rect = pygame.Rect(x - w // 2, y - h // 2, w, h)
-        # zombie arms reaching down
-        for side in (-1, 1):
-            reach = 6 * math.sin(self.t * 3 + side)
-            hand = (x + side * 26, y + 46 + reach)
-            pygame.draw.line(s, (90, 160, 80), (x + side * 22, y + 20), hand, 7)
-            for fx in (-5, 0, 5):
-                pygame.draw.line(s, (90, 160, 80), hand, (hand[0] + fx, hand[1] + 7), 3)
-        blit_glow(s, x, y, 50, (60, 120, 220), 50)
-        pygame.draw.rect(s, WHITE if fl else (40, 95, 170), rect, border_radius=4)
-        line = (95, 150, 225)
-        for i in (1, 2):
-            pygame.draw.line(s, line, (rect.x + w * i // 3, rect.y), (rect.x + w * i // 3, rect.bottom), 2)
-            pygame.draw.line(s, line, (rect.x, rect.y + h * i // 3), (rect.right, rect.y + h * i // 3), 2)
-        pygame.draw.rect(s, (20, 50, 100), rect, 3, border_radius=4)
-        for cx in (rect.x + w // 6, rect.right - w // 6):
-            pygame.draw.circle(s, YELLOW, (cx, rect.y + h // 6 + 1), 6)
-            pygame.draw.circle(s, (0, 0, 0), (cx, rect.y + h // 6 + 3), 3)
-        teeth = [(rect.x + 12 + i * 7, y + 12 + (6 if i % 2 else 0)) for i in range(7)]
-        pygame.draw.lines(s, (150, 20, 30), False, teeth, 3)
+        t = self.t
+        blit_glow(s, x, y, 72, (60, 120, 220), 45)
+        # robot legs, stomping alternately
+        for i, lx in enumerate((ox + 24, ox + 82)):
+            lift = int(max(0.0, math.sin(t * 5 + i * math.pi)) * 5)
+            pygame.draw.rect(s, (60, 140, 75), (lx - 5, oy + 80, 10, 12))
+            pygame.draw.circle(s, (40, 100, 55), (lx, oy + 92 - lift // 2), 5)
+            pygame.draw.rect(s, (70, 160, 85), (lx - 4, oy + 93 - lift, 8, 9))
+            pygame.draw.rect(s, (40, 100, 55), (lx - 9, oy + 101 - lift, 18, 7), border_radius=3)
+            pygame.draw.line(s, (110, 200, 120), (lx - 7, oy + 102 - lift), (lx + 7, oy + 102 - lift), 1)
+        # siren on top (blinks fast while charging) + calculator keypad
+        on = math.sin(t * (22 if self.charge > 0 else 4)) > 0
+        if on:
+            blit_glow(s, ox + 44, oy - 4, 20, RED, 120 if self.charge > 0 else 60)
+        pygame.draw.circle(s, (255, 70, 70) if on else (120, 20, 25), (ox + 44, oy - 3), 6)
+        pygame.draw.circle(s, (255, 200, 200), (ox + 42, oy - 5), 2)
+        pygame.draw.rect(s, (60, 60, 75), (ox + 37, oy - 2, 14, 4))
+        pygame.draw.rect(s, (150, 160, 180), (ox + 64, oy - 7, 34, 9), border_radius=2)
+        pygame.draw.rect(s, (80, 220, 120), (ox + 67, oy - 5, 7, 5))
+        for i in range(4):
+            for j in range(2):
+                col = RED if (i, j) == (3, 1) else (60, 70, 90)
+                pygame.draw.rect(s, col, (ox + 77 + i * 5, oy - 6 + j * 4, 4, 3))
         for i in range(self.hp):
-            pygame.draw.rect(s, RED, (x - 18 + i * 10, rect.y - 10, 7, 5))
+            pygame.draw.rect(s, RED, (ox + 4 + i * 8, oy - 9, 6, 5))
+        # the sheet itself
+        if fl:
+            pygame.draw.rect(s, WHITE, (ox, oy, 106, 84), border_radius=7)
+        else:
+            s.blit(base, (ox, oy))
+            s.blit(rain, (ox + 19, oy + 18), (0, 60 - int(t * 25) % 60, 81, 60))
+            s.blit(grid, (ox, oy))
+            self.draw_cells(s, ox, oy)
+
+        def cell(c, r):
+            return ox + 32 + 27 * c, oy + 28 + 20 * r
+
+        # coin eyes in A1 and C1, pupils follow the player, flip like a coin to blink
+        squash = abs(math.cos((1 - self.spin / 0.4) * 2 * math.pi)) if self.spin > 0 else 1.0
+        for c in (0, 2):
+            cx, cy = cell(c, 0)
+            w = max(1.0, 8 * squash)
+            pts = [(cx + w * math.cos(a), cy + 8 * math.sin(a)) for a in (math.pi / 8 + k * math.pi / 4 for k in range(8))]
+            pygame.draw.polygon(s, (245, 190, 40), pts)
+            pygame.draw.polygon(s, (150, 90, 10), pts, 2)
+            if squash > 0.6:
+                pygame.draw.circle(s, (205, 135, 20), (cx, cy), 5, 1)
+                pygame.draw.circle(s, (25, 10, 35), (int(cx + self.look * 3 * squash), cy + 1), 3)
+                pygame.draw.circle(s, (255, 245, 180), (int(cx - w * 0.45), cy - 4), 2)
+        # zigzag mouth across row 3: chews idly, gapes open before spitting
+        opn = max(self.charge, self.gape / 0.3)
+        zig = 5 + 1.5 * math.sin(t * 6) - opn
+        mx0, my = ox + 24, oy + 68 - int(6 * opn)
+        up = [(mx0 + i * 12, my + (-zig if i % 2 else zig)) for i in range(7)]
+        if opn > 0.05:
+            # gaping maw: dark inside, teeth top and bottom
+            gap = 18 * opn
+            lo = [(px, py + gap) for px, py in up]
+            top, bot = my - zig, my + zig + gap
+            pygame.draw.rect(s, (60, 0, 15), (mx0, top, 72, bot - top))
+            pygame.draw.polygon(s, (235, 225, 200), up + [(mx0 + 72, top), (mx0, top)])
+            pygame.draw.polygon(s, (235, 225, 200), lo + [(mx0 + 72, bot), (mx0, bot)])
+            pygame.draw.lines(s, (215, 35, 45), False, lo, 4)
+        pygame.draw.lines(s, (215, 35, 45), False, up, 4)
+        # drool
+        dl = 5 + 7 * (0.5 + 0.5 * math.sin(t * 1.7))
+        dx, dy = mx0 + 48, oy + 78
+        pygame.draw.line(s, (140, 230, 90), (dx, dy), (dx, dy + dl), 3)
+        pygame.draw.circle(s, (140, 230, 90), (dx, int(dy + dl)), 3)
+        if fl:
+            return
+        # selection brackets (jumps to B2 while charging a formula)
+        sx, sy = cell(self.sel[0], self.sel[1])
+        L = 5
+        for ex, ey, hx, vy in ((-13, -9, 1, 1), (13, -9, -1, 1), (-13, 9, 1, -1), (13, 9, -1, -1)):
+            px, py = sx + ex, sy + ey
+            pygame.draw.line(s, YELLOW, (px, py), (px + hx * L, py), 2)
+            pygame.draw.line(s, YELLOW, (px, py), (px, py + vy * L), 2)
+        # telegraph: the formula it is about to "calculate"
+        if self.charge > 0:
+            img = render(self.formula, 18, WHITE)
+            bx, by = cell(1, 1)
+            box = img.get_rect(center=(bx, by)).inflate(8, 4)
+            pygame.draw.rect(s, (10, 10, 15), box)
+            pygame.draw.rect(s, QLIK_GREEN, box, 1)
+            s.blit(img, img.get_rect(center=(bx, by)))
+            self.draw_cursor(s, box.right - 2, box.bottom - 6)
+
+    def draw_cells(self, s, ox, oy):
+        t = self.t
+        damaged = 4 - self.hp  # cells overflow to ##### as it takes damage
+
+        def cell(c, r):
+            return ox + 32 + 27 * c, oy + 28 + 20 * r
+
+        for n, (c, r) in enumerate(((1, 0), (0, 1), (2, 1))):
+            cx, cy = cell(c, r)
+            if n < damaged:
+                draw_text(s, "####", 16, (255, 120, 120), center=(cx, cy), shadow=False)
+            elif n < 2:
+                pygame.draw.rect(s, (150, 190, 240), (cx - 11, cy - 3, 22, 7), 1)
+                for k in range(int((t * 0.9 + n * 0.4) % 1 * 5)):
+                    pygame.draw.rect(s, (210, 230, 255), (cx - 9 + k * 4, cy - 1, 3, 3))
+            else:
+                for k in range(3):
+                    bh = 4 + int(7 * abs(math.sin(t * 3 + k)))
+                    pygame.draw.rect(s, (150, 200, 245), (cx - 8 + k * 6, cy + 7 - bh, 4, bh), 1)
+        if self.charge <= 0:
+            bx, by = cell(1, 1)
+            self.draw_cursor(s, bx + int(6 * math.sin(t * 1.3)), by - 4 + int(3 * math.sin(t * 2.1)))
+
+    @staticmethod
+    def draw_cursor(s, x, y):
+        pts = [(x, y), (x, y + 10), (x + 3, y + 7), (x + 5, y + 11), (x + 7, y + 10), (x + 5, y + 6), (x + 9, y + 6)]
+        pygame.draw.polygon(s, (110, 230, 140), pts)
+        pygame.draw.polygon(s, (0, 0, 0), pts, 1)
 
 
 class TrainCar(Enemy):
     name = "FIVETRAIN"
-    tagline = "All aboard the ghost pipeline!"
+    tagline = "Alla ombord på spökpipelinen!"
     r = 22
     points = 120
 
@@ -727,6 +933,7 @@ class Game:
         self.last_tick = None
         self.banner, self.banner_queue = None, []
         self.sfx.play("start")
+        self.sfx.start_music()
         self.set_state("playing")
 
     def end_round(self):
@@ -737,6 +944,7 @@ class Game:
         self.banner, self.banner_queue = None, []
         self.sfx.play("explode")
         self.sfx.play("over")
+        self.sfx.start_drone()
         self.shake = 10
         best = self.scores[0] if self.scores else 0
         self.new_best = self.score > 0 and self.score > best
@@ -876,7 +1084,7 @@ class Game:
             e.group["killed"] += 1
             if e.group["killed"] == 5:
                 self.score += 500
-                self.add_float(W / 2, H / 2, "TRAIN WRECK!  +500", YELLOW, 52, life=2.2)
+                self.add_float(W / 2, H / 2, "TÅGKRASCH!  +500", YELLOW, 52, life=2.2)
                 self.sfx.play("bonus")
 
     def player_hit(self):
@@ -963,9 +1171,9 @@ class Game:
         self.screen.blit(w, (ox, oy))
 
     def draw_hud(self, w):
-        draw_text(w, "SCORE %d" % self.score, 36, WHITE, topleft=(16, 12))
+        draw_text(w, "POÄNG %d" % self.score, 36, WHITE, topleft=(16, 12))
         best = max(self.scores[0] if self.scores else 0, self.score)
-        draw_text(w, "HI %d" % best, 36, QLIK_LIGHT, topright=(W - 16, 12))
+        draw_text(w, "REKORD %d" % best, 36, QLIK_LIGHT, topright=(W - 16, 12))
         remaining = max(0.0, ROUND_SECONDS - self.elapsed)
         sec = math.ceil(remaining)
         if remaining <= 10:
@@ -975,7 +1183,7 @@ class Game:
             draw_text(w, str(sec), 52, WHITE, center=(W / 2, 32))
         if self.banner:
             name, tag, _ = self.banner
-            draw_text(w, "NEW SPOOK DETECTED", 26, ORANGE, center=(W / 2, 110))
+            draw_text(w, "NYTT SPÖKE UPPTÄCKT", 26, ORANGE, center=(W / 2, 110))
             draw_text(w, name, 64, QLIK_LIGHT, center=(W / 2, 152))
             draw_text(w, tag, 28, WHITE, center=(W / 2, 194))
 
@@ -987,28 +1195,28 @@ class Game:
             pygame.draw.line(w, QLIK_GREEN, (sx, sy), (sx, sy + length), 4)
             pygame.draw.circle(w, QLIK_GREEN, (sx, int(sy + length)), 4)
         w.blit(self.title_img, rect)
-        draw_text(w, "Your data is haunted. We can help.", 32, WHITE, center=(W / 2, 255))
+        draw_text(w, "Det spökar i din data. Vi kan hjälpa till.", 32, WHITE, center=(W / 2, 255))
         if int(self.clock * 2) % 2 == 0:
-            draw_text(w, "PRESS ANY BUTTON", 44, YELLOW, center=(W / 2, 320))
-        draw_text(w, "LEFT / RIGHT to move   -   MIDDLE to fire", 26, GREY, center=(W / 2, 362))
-        draw_text(w, "TOP SCORES", 30, ORANGE, center=(W / 2, 412))
+            draw_text(w, "TRYCK PÅ VALFRI KNAPP", 44, YELLOW, center=(W / 2, 320))
+        draw_text(w, "VÄNSTER / HÖGER för att styra   -   MITTEN för att skjuta", 26, GREY, center=(W / 2, 362))
+        draw_text(w, "TOPPLISTA", 30, ORANGE, center=(W / 2, 412))
         if self.scores:
             for i, s in enumerate(self.scores[:5]):
                 draw_text(w, "%d.  %d" % (i + 1, s), 28, WHITE, center=(W / 2, 442 + i * 24))
         else:
-            draw_text(w, "No victims yet...", 28, GREY, center=(W / 2, 442))
+            draw_text(w, "Inga offer än...", 28, GREY, center=(W / 2, 442))
 
     def draw_over(self, w):
-        draw_text(w, "TIME'S UP!", 84, ORANGE, center=(W / 2, 130))
+        draw_text(w, "TIDEN ÄR UTE!", 84, ORANGE, center=(W / 2, 130))
         draw_text(w, str(self.score), 120, WHITE, center=(W / 2, 235))
-        draw_text(w, "POINTS", 30, GREY, center=(W / 2, 300))
-        draw_text(w, "Rank: " + self.rank, 42, QLIK_LIGHT, center=(W / 2, 355))
+        draw_text(w, "POÄNG", 30, GREY, center=(W / 2, 300))
+        draw_text(w, "Rang: " + self.rank, 42, QLIK_LIGHT, center=(W / 2, 355))
         if self.new_best and int(self.clock * 3) % 2 == 0:
-            draw_text(w, "NEW HIGH SCORE!", 52, YELLOW, center=(W / 2, 415))
-        draw_text(w, "Monsters busted: %d     Times spooked: %d" % (self.kills, self.hits), 28, WHITE,
+            draw_text(w, "NYTT REKORD!", 52, YELLOW, center=(W / 2, 415))
+        draw_text(w, "Monster nedskjutna: %d     Gånger skrämd: %d" % (self.kills, self.hits), 28, WHITE,
                   center=(W / 2, 470))
         if self.state_t > 3.0 and int(self.clock * 2) % 2 == 0:
-            draw_text(w, "PRESS ANY BUTTON TO PLAY AGAIN", 32, YELLOW, center=(W / 2, 520))
+            draw_text(w, "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN", 32, YELLOW, center=(W / 2, 520))
 
 
 # ----------------------------------------------------------------------- main
@@ -1029,7 +1237,10 @@ def main():
                 pygame.quit()
                 return
         game.inp.poll()
-        game.update(dt)
+        steps = FAST_FORWARD if pygame.key.get_pressed()[pygame.K_SPACE] else 1
+        for i in range(steps):
+            game.update(dt)
+            game.inp.any_pressed = False  # edge only counts once per frame
         game.draw()
         pygame.display.flip()
 

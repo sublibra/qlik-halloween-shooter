@@ -25,7 +25,7 @@ uv sync
 uv run src/qlik_or_treat.py --window
 ```
 (or `pip install pygame` and `python3 src/qlik_or_treat.py --window`)
-Arrows (or A/D) to move, SPACE to fire (hold = auto-fire), ESC to quit.
+Arrows (or A/D) to move, UP/W/ENTER to fire (hold = auto-fire), hold SPACE to fast-forward (testing), ESC to quit.
 
 Headless smoke test (bot plays a round, screenshots in `shots/`, frame timing):
 `uv run src/headless_test.py`

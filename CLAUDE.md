@@ -16,6 +16,7 @@ Day 1 prototype is done (`src/qlik_or_treat.py`, ~1000 lines, single file). Keep
 - Players from age 5 to adults, at a party, often with a crowd watching.
 - Fun and laughs over balance. Not meant to be taken seriously.
 - Dark and spooky, but cartoonish, not scary-scary.
+- **On-screen text is Swedish** (monster names stay English parodies). Excel errors use Swedish Excel names (#REFERENS!, LETARAD...).
 - Parody, never real logos. Competitor jokes stay gentle (it may end up on LinkedIn).
 
 ## Hardware
@@ -29,8 +30,9 @@ Day 1 prototype is done (`src/qlik_or_treat.py`, ~1000 lines, single file). Keep
 ## Tech
 - Python 3 + Pygame (Pi: `python3-pygame` from apt, pygame 2.1.x — avoid APIs newer than that; laptop has 2.6, so be careful). `gpiozero` for buttons, optional.
 - Logical resolution 800×600, `pygame.SCALED | FULLSCREEN` on the Pi; `--window` flag for laptop dev.
-- Keyboard fallback: arrows/A/D move, SPACE fire (hold = auto-fire), ESC quit.
+- Keyboard fallback: arrows/A/D move, UP/W/ENTER fire (hold = auto-fire), hold SPACE = 8× fast-forward (testing), ESC quit.
 - No asset files: all graphics drawn procedurally, all sounds synthesised at startup with `array` (no numpy).
+- Background loop on mixer channel 0: ambient drone on title/game over, 12.8 s A-minor music loop during rounds (`Sfx.music_loop`).
 - Must hold 60 fps on the Pi 4. Laptop: ~0.7 ms avg/frame in the headless test (Pi is maybe 5–10× slower).
 - High scores in `highscores.json` next to the script (`src/` on the laptop, the install dir on the Pi).
 
