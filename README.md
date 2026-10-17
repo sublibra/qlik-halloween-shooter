@@ -3,6 +3,9 @@
 A spooky, silly, Qlik-themed 3-button arcade shooter for Raspberry Pi 4.
 90-second rounds, you never die (getting hit costs 100 points), high scores saved to `highscores.json`.
 
+<img width="1602" height="1201" alt="screenshot" src="https://github.com/user-attachments/assets/1f0c87b2-6cd3-46d9-b4e5-a65222d9a0da" />
+
+
 ## Wiring (Pi 4, 40-pin header)
 
 Each button: one leg to the GPIO pin, the other leg to any GND. For 3-tab microswitches use **COM** and **NO**.
