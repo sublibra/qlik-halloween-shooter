@@ -11,5 +11,6 @@ wheels/
 
 # Game runtime / test output
 highscores.json
+settings.json
 shots/
 .DS_Store

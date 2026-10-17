@@ -28,6 +28,8 @@ uv run src/qlik_or_treat.py --window
 Add `--wide` for widescreen (16:9 in a window; fullscreen matches the screen's aspect ratio).
 Arrows (or A/D) to move, UP/W/ENTER to fire (hold = auto-fire), hold SPACE to fast-forward (testing), ESC to quit.
 
+Admin keys (plug a keyboard into the cabinet): **L** Swedish/English, **N** new game (throws away a round in progress), **M** basic/expert mode (the whole round runs 1.3× faster), **R** rename the most recent high score (for when someone enters something rude). Language and mode are saved in `settings.json` next to the script.
+
 Headless smoke test (bot plays a round, screenshots in `shots/`, frame timing):
 `uv run src/headless_test.py`
 
