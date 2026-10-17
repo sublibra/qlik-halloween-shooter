@@ -30,25 +30,23 @@ import qlik_or_treat as q  # noqa: E402
 DT = 1 / 60
 
 
-class FakeInput:
-    def __init__(self):
-        self.left = self.right = self.fire = False
-        self.any = self.any_pressed = False
-
-    def set(self, left=False, right=False, fire=False):
-        prev = self.any
-        self.left, self.right, self.fire = left, right, fire
-        self.any = left or right or fire
-        self.any_pressed = self.any and not prev
-
-
 def bot(game, inp):
-    """Chase the lowest active enemy, always fire."""
+    """Grab falling power-ups, then deal with low enemies, then the boss, then the lowest enemy.
+    Always fires."""
     p = game.player
     targets = [e for e in game.enemies if e.active() and e.y < p.y - 40]
+    pickups = [pu for pu in game.powerups if pu.y > 250]
     left = right = False
-    if targets:
+    t = None
+    threats = [e for e in targets if e.y > 300]
+    boss = game.boss if game.boss and not game.boss.dead and game.boss.active() else None
+    if pickups:
+        t = max(pickups, key=lambda pu: pu.y)
+    elif boss and not threats:
+        t = boss
+    elif targets:
         t = max(targets, key=lambda e: e.y)
+    if t:
         if t.x < p.x - 8:
             left = True
         elif t.x > p.x + 8:
@@ -73,7 +71,7 @@ def main():
     pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()
     screen = pygame.display.set_mode((q.W, q.H))
-    inp = FakeInput()
+    inp = q.Controls()
     game = q.Game(screen, q.Sfx(), inp)
     if not args.no_shots:
         os.makedirs(args.shots, exist_ok=True)
@@ -101,7 +99,7 @@ def main():
             step()
             inp.set()
             step()
-        snaps = {int(s * 60) for s in (10, 30, 50, 70, 85)}
+        snaps = {int(s * 60) for s in (10, 30, 48, 55, 63, 70, 78, 84)}
         frame = 0
         while game.state == "playing":
             bot(game, inp)
@@ -109,18 +107,38 @@ def main():
             frame += 1
             if rnd == 1 and frame in snaps:
                 shot("play_%02ds" % (frame // 60))
+        for _ in range(70):
+            inp.set()
+            step()
+        if game.state == "initials":
+            if rnd == 1:
+                shot("initials")
+                for ch in "BO\bOO":  # type on the keyboard, with a backspace
+                    inp.typed.append(ch)
+                    for _ in range(5):
+                        step()
+            else:
+                inp.set(fire=True); step(); inp.set(); step()  # double tap FIRE = skip
+                inp.set(fire=True); step(); inp.set(); step()
+            assert game.state == "over", game.state
         for _ in range(60):
             inp.set()
             step()
         if rnd == 1:
             shot("game_over")
-        print("round %d: score %d  rank %-26s kills %d  hits %d"
-              % (rnd, game.score, game.rank, game.kills, game.hits))
+        print("round %d: score %d  rank %-26s kills %d  hits %d  bosses: %s  name %r"
+              % (rnd, game.score, game.rank, game.kills, game.hits,
+                 ", ".join(game.boss_killed) or "none killed", game.name))
         # wait out the 3 s restart lock
         for _ in range(int(3.2 * 60)):
             inp.set()
             step()
 
+    print("top 10:", game.scores)
+    for _ in range(int(13 * 60)):  # back to the title screen with initials
+        inp.set()
+        step()
+    shot("title_scores")
     frame_times.sort()
     n = len(frame_times)
     print("frames %d  avg %.2f ms  p95 %.2f ms  max %.2f ms  (budget 16.7 ms)"

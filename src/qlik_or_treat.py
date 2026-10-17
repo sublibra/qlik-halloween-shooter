@@ -4,6 +4,7 @@ QLIK OR TREAT  -  a spooky, silly, Qlik-themed arcade shooter for Raspberry Pi.
 
 Controls (3 buttons):  LEFT  |  FIRE  |  RIGHT
   Keyboard:  arrows or A/D to move, UP/W/ENTER to fire (hold for auto-fire), ESC to quit
+             type letters for high-score initials (or press FIRE twice quickly to skip)
              hold SPACE to fast-forward (for testing)
   GPIO:      one leg of each button to the pin below, other leg to GND
              (internal pull-ups are used, no resistors needed)
@@ -31,6 +32,12 @@ FAST_FORWARD = 8  # game speed multiplier while SPACE is held (testing aid)
 ROUND_SECONDS = 90
 HIT_PENALTY = 100
 TRAIN_TIMES = (35, 65)  # seconds into the round when the Fivetrain arrives
+MID_BOSS_TIME = 46  # Inferno-matica drops by mid-round...
+MID_BOSS_STAY = 14  # ...and gives up ("Timeout!") if it isn't beaten by then
+BOSS_TIME = 75  # Mega Power BOO-I arrives for the last 15 s
+LATE_POWERUPS = 60  # Associative Blast and Answers Bot only drop from here on
+SCHEDULED_DROPS = ((62, "assoc"), (BOSS_TIME + 1.5, "bot"))  # everyone gets to see them
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖ"
 
 PIN_LEFT = int(os.environ.get("PIN_LEFT", 17))    # physical pin 11
 PIN_FIRE = int(os.environ.get("PIN_FIRE", 27))    # physical pin 13
@@ -47,6 +54,8 @@ GREY = (180, 180, 200)
 RED = (235, 50, 60)
 ORANGE = (255, 140, 20)
 YELLOW = (242, 200, 17)
+SICK = (150, 200, 60)
+ANSWERS = (175, 130, 255)
 CONFETTI = [QLIK_GREEN, QLIK_LIGHT, (255, 180, 0), (230, 60, 130), (60, 160, 255), ORANGE]
 
 KILL_QUIPS = [
@@ -93,9 +102,17 @@ def rank_for(score):
 
 
 def load_scores():
+    """List of (score, initials), best first. Also reads the old format (plain ints)."""
     try:
         with open(SCORE_FILE) as f:
-            return sorted((int(s) for s in json.load(f)), reverse=True)[:10]
+            data = json.load(f)
+        scores = []
+        for item in data:
+            if isinstance(item, dict):
+                scores.append((int(item["score"]), str(item.get("name", ""))[:3]))
+            else:
+                scores.append((int(item), ""))
+        return sorted(scores, key=lambda s: -s[0])[:10]
     except Exception:
         return []
 
@@ -103,7 +120,7 @@ def load_scores():
 def save_scores(scores):
     try:
         with open(SCORE_FILE, "w") as f:
-            json.dump(scores, f)
+            json.dump([{"score": s, "name": n} for s, n in scores], f)
     except Exception as exc:
         print("Could not save scores:", exc)
 
@@ -175,7 +192,7 @@ class Sfx:
                 raise RuntimeError("unsupported sample format %s" % fmt)
             self.rate, self.channels = freq, ch
             pygame.mixer.set_num_channels(24)
-            pygame.mixer.set_reserved(1)
+            pygame.mixer.set_reserved(2)
             self._build()
             self.enabled = True
         except Exception as exc:
@@ -225,6 +242,16 @@ class Sfx:
                  + 0.45 * lfo * math.sin(tau * 82.5 * t)
                  + 0.2 * (1 - lfo) * math.sin(tau * 220.25 * t + 2 * math.sin(tau * 0.5 * t)))
             out.append(int(s / 2.4 * 0.22 * 32767))
+        return out
+
+    def beam_loop(self, dur=0.4):
+        # buzzy laser hum, whole cycles in 0.4 s so it loops cleanly
+        r, tau = self.rate, 2 * math.pi
+        out = array.array("h")
+        for i in range(int(r * dur)):
+            t = i / r
+            s = 0.6 * (2 * (110 * t % 1.0) - 1) + 0.4 * math.sin(tau * 440 * t) * math.sin(tau * 5 * t)
+            out.append(int(s * 0.1 * 32767))
         return out
 
     def music_loop(self):
@@ -284,6 +311,20 @@ class Sfx:
         self.sounds["start"] = S(self.seq([330, 392, 494, 659, 988], 0.09, "tri", 0.3))
         self.sounds["over"] = S(self.seq([392, 330, 262, 196, 131], 0.22, "saw", 0.22, vib=0.03))
         self.sounds["bonus"] = S(self.seq([523, 659, 784, 1047, 1319], 0.07, "square", 0.15))
+        self.sounds["powerup"] = S(self.seq([523, 784, 1047, 1568], 0.06, "tri", 0.3))
+        self.sounds["shield"] = S(T(500, 1000, 0.4, "tri", 0.25, vib=0.1, vibf=20))
+        self.sounds["pop"] = S(T(900, 1500, 0.08, "sine", 0.3))
+        self.sounds["blip"] = S(T(1800, 900, 0.05, "tri", 0.07))
+        self.sounds["hello"] = S(self.seq([660, 880, 1320], 0.08, "sine", 0.25))
+        self.sounds["moo"] = S(T(190, 120, 0.7, "saw", 0.22, vib=0.05, vibf=6, attack=0.08))
+        self.sounds["boom"] = S(T(120, 25, 0.9, "square", 0.4, noise=0.9))
+        self.sounds["splat"] = S(T(400, 120, 0.15, "sine", 0.4, noise=0.3))
+        self.sounds["teleport"] = S(T(300, 1500, 0.3, "sine", 0.2, vib=0.3, vibf=30))
+        self.sounds["sneeze"] = S(T(900, 200, 0.3, "saw", 0.2, noise=0.7, attack=0.02))
+        self.sounds["roar"] = S(T(110, 55, 1.4, "saw", 0.35, vib=0.12, vibf=9, noise=0.3, attack=0.1))
+        self.sounds["charge"] = S(T(200, 900, 1.2, "square", 0.07, vib=0.05, vibf=12, attack=0.9))
+        self.sounds["fireball"] = S(T(600, 150, 0.35, "saw", 0.14, noise=0.5))
+        self.beam_hum = S(self.beam_loop())
         self.drone = S(self.drone_loop())
         self.music = S(self.music_loop())
 
@@ -302,10 +343,43 @@ class Sfx:
     def start_music(self):
         self._loop(self.music)
 
+    def beam(self, on):
+        # channel 1 is reserved for the Pipeline beam hum
+        if not self.enabled:
+            return
+        ch = pygame.mixer.Channel(1)
+        if on and not ch.get_busy():
+            ch.play(self.beam_hum, loops=-1)
+        elif not on and ch.get_busy():
+            ch.stop()
+
 
 # ---------------------------------------------------------------------- input
-class Input:
+class Controls:
+    """Held state + press edges for the three buttons, plus typed keyboard letters."""
+
     def __init__(self):
+        self.left = self.right = self.fire = self.any = False
+        self.left_pressed = self.right_pressed = self.fire_pressed = self.any_pressed = False
+        self.text_mode = False  # while typing initials, A/D/W are letters, not controls
+        self.typed = []  # letters (and "\b" for backspace) typed since last update
+
+    def set(self, left=False, right=False, fire=False):
+        pl, pr, pf, pa = self.left, self.right, self.fire, self.any
+        self.left, self.right, self.fire = bool(left), bool(right), bool(fire)
+        self.any = self.left or self.right or self.fire
+        self.left_pressed = self.left and not pl
+        self.right_pressed = self.right and not pr
+        self.fire_pressed = self.fire and not pf
+        self.any_pressed = self.any and not pa
+
+    def clear_edges(self):
+        self.left_pressed = self.right_pressed = self.fire_pressed = self.any_pressed = False
+
+
+class Input(Controls):
+    def __init__(self):
+        super().__init__()
         self.buttons = None
         try:
             from gpiozero import Button
@@ -315,22 +389,29 @@ class Input:
             print("GPIO buttons enabled on", PIN_LEFT, PIN_FIRE, PIN_RIGHT)
         except Exception as exc:
             print("GPIO not available, keyboard only (%s: %s)" % (exc.__class__.__name__, exc))
-        self.left = self.right = self.fire = False
-        self.any = self.any_pressed = False
 
     def poll(self):
         k = pygame.key.get_pressed()
-        l = k[pygame.K_LEFT] or k[pygame.K_a]
-        r = k[pygame.K_RIGHT] or k[pygame.K_d]
-        f = k[pygame.K_UP] or k[pygame.K_w] or k[pygame.K_RETURN]
+        wasd = not self.text_mode
+        l = k[pygame.K_LEFT] or (wasd and k[pygame.K_a])
+        r = k[pygame.K_RIGHT] or (wasd and k[pygame.K_d])
+        f = k[pygame.K_UP] or (wasd and k[pygame.K_w]) or k[pygame.K_RETURN] or k[pygame.K_KP_ENTER]
         if self.buttons:
             l = l or self.buttons[0].is_pressed
             f = f or self.buttons[1].is_pressed
             r = r or self.buttons[2].is_pressed
-        prev = self.any
-        self.left, self.right, self.fire = bool(l), bool(r), bool(f)
-        self.any = self.left or self.right or self.fire
-        self.any_pressed = self.any and not prev
+        self.set(l, r, f)
+
+    def key_down(self, e):
+        if e.key == pygame.K_BACKSPACE:
+            self.typed.append("\b")
+            return
+        ch = (getattr(e, "unicode", "") or "").upper()
+        if not ch:
+            name = pygame.key.name(e.key)
+            ch = name.upper() if len(name) == 1 else ""
+        if ch and ch in ALPHABET:
+            self.typed.append(ch)
 
 
 # ----------------------------------------------------------------- background
@@ -354,7 +435,7 @@ class Background:
             pygame.draw.circle(s, (195, 195, 175), (x + cx, y + cy), r)
 
     def _graveyard(self, s):
-        labels = ["RIP", "EXCEL 97", "RIP", "LETARAD", "CSV", "RIP", "MAKRON", "RIP"]
+        labels = ["RIP", "COGNOS", "EXCEL 97", "CRYSTAL REPORTS", "LOOKER", "CSV", "BUSINESS OBJECTS", "TABLEAU", "RIP"]
         stone = (38, 28, 54)
         x = 20
         for label in labels * 2:  # repeat so wide screens are filled too
@@ -448,15 +529,20 @@ class Player:
         self.tilt += (d - self.tilt) * min(1.0, dt * 10)
         self.cool -= dt
         self.inv = max(0.0, self.inv - dt)
-        if inp.fire and self.cool <= 0:
-            game.bullets.append(Bullet(self.x, self.y - 28))
+        game.beam_on = inp.fire and game.beam_t > 0  # the Pipeline beam replaces bullets
+        if inp.fire and not game.beam_on and self.cool <= 0:
+            game.bullets.append(Bullet(self.x, self.y - 28, kind="sel" if game.assoc_t > 0 else "q"))
             self.cool = 0.15
             game.sfx.play("shoot")
 
-    def draw(self, s, clock):
+    def draw(self, s, clock, shield=False):
+        x, y = int(self.x), int(self.y)
+        if shield:
+            pulse = int(clock * 6) % 2
+            blit_glow(s, x, y, 58, YELLOW, 50 + 20 * pulse)
+            pygame.draw.circle(s, YELLOW, (x, y + 4), 44 + pulse * 2, 2)
         if self.inv > 0 and int(clock * 20) % 2 == 0:
             return
-        x, y = int(self.x), int(self.y)
         fl = random.randint(10, 18)
         pygame.draw.polygon(s, ORANGE, [(x - 8, y + 20), (x + 8, y + 20), (x, y + 20 + fl)])
         pygame.draw.polygon(s, YELLOW, [(x - 4, y + 20), (x + 4, y + 20), (x, y + 20 + fl * 0.6)])
@@ -471,28 +557,230 @@ class Player:
 
 
 class Bullet:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
+    """kind: "q" normal, "sel" Associative Blast selection, "bot" fired by the Answers Bot."""
+
+    def __init__(self, x, y, vx=0.0, vy=-760.0, kind="q"):
+        self.x, self.y, self.vx, self.vy, self.kind = x, y, vx, vy, kind
         self.dead = False
 
     def update(self, dt):
-        self.y -= 760 * dt
-        if self.y < -20:
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        if self.y < -20 or self.x < -20 or self.x > W + 20:
             self.dead = True
 
     def draw(self, s):
-        blit_glow(s, self.x, self.y, 12, QLIK_GREEN, 110)
-        pygame.draw.rect(s, QLIK_LIGHT, (int(self.x) - 2, int(self.y) - 9, 4, 17))
+        x, y = int(self.x), int(self.y)
+        if self.kind == "bot":
+            blit_glow(s, x, y, 12, ANSWERS, 120)
+            pygame.draw.circle(s, (225, 210, 255), (x, y), 4)
+        elif self.kind == "sel":
+            blit_glow(s, x, y, 18, QLIK_GREEN, 140)
+            pygame.draw.rect(s, WHITE, (x - 3, y - 10, 6, 19), border_radius=3)
+        else:
+            blit_glow(s, x, y, 12, QLIK_GREEN, 110)
+            pygame.draw.rect(s, QLIK_LIGHT, (x - 2, y - 9, 4, 17))
+
+
+class SlimeBlob:
+    """Snot sneezed by Sick-Sense."""
+    shootable = False
+
+    def __init__(self, x, y, vx):
+        self.x, self.y, self.vx = x, y, vx
+        self.t = 0.0
+        self.dead = False
+
+    def update(self, dt):
+        self.t += dt
+        self.x += self.vx * dt
+        self.y += 190 * dt
+        if self.y > H + 20:
+            self.dead = True
+
+    def draw(self, s):
+        x, y = int(self.x), int(self.y)
+        blit_glow(s, x, y, 24, SICK, 90)
+        wob = int(2 * math.sin(self.t * 14))
+        pygame.draw.polygon(s, SICK, [(x - 8, y), (x, y - 18 - wob), (x + 8, y)])
+        pygame.draw.circle(s, SICK, (x, y + 2), 9 + wob // 2)
+        pygame.draw.circle(s, (215, 245, 150), (x - 3, y - 1), 3)
+
+
+class Fireball:
+    """Boss attack (fireballs or bar charts). Can be shot down."""
+    shootable = True
+
+    def __init__(self, x, y, vx, vy, style="fire"):
+        self.x, self.y, self.vx, self.vy = x, y, vx, vy
+        self.style = style  # "fire" (Inferno-matica) or "bar" (Mega Power BOO-I's bar charts)
+        self.t = random.uniform(0, 3)
+        self.dead = False
+
+    def update(self, dt):
+        self.t += dt
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        if self.y > H + 30 or self.x < -30 or self.x > W + 30:
+            self.dead = True
+
+    def draw(self, s):
+        x, y = int(self.x), int(self.y)
+        if self.style == "bar":
+            blit_glow(s, x, y, 28, YELLOW, 90)
+            h = 22 + int(4 * math.sin(self.t * 12))
+            pygame.draw.rect(s, (200, 150, 0), (x - 8, y - h // 2, 16, h))
+            pygame.draw.rect(s, YELLOW, (x - 5, y - h // 2 + 3, 10, h - 6))
+            return
+        blit_glow(s, x, y, 30, ORANGE, 110)
+        for k in (3, 2, 1):
+            pygame.draw.circle(s, (200, 60, 10), (int(x - self.vx * 0.025 * k), int(y - self.vy * 0.025 * k)), 9 - 2 * k)
+        pygame.draw.circle(s, (255, 90, 20), (x, y), 11 + int(math.sin(self.t * 20) > 0))
+        pygame.draw.circle(s, YELLOW, (x, y), 6)
+
+
+class PowerUp:
+    KINDS = {  # kind: (capsule label, colour, pickup text)
+        "beam": ("PIPELINE", (70, 170, 255), "PIPELINE-STRÅLE!"),
+        "shield": ("SKÖLD", YELLOW, "INSIKTSSKÖLD!"),
+        "assoc": ("QLIK ENGINE", QLIK_GREEN, "QLIK ENGINE: ASSOCIATIV SPRÄNGNING!"),
+        "bot": ("QLIK ANSWERS", ANSWERS, "QLIK ANSWERS-BOT TILL UNDSÄTTNING!"),
+    }
+
+    def __init__(self, x, y, kind):
+        self.x, self.y, self.bx, self.kind = x, y, x, kind
+        self.t = 0.0
+        self.dead = False
+
+    def update(self, dt):
+        self.t += dt
+        self.y += 105 * dt
+        self.x = clamp(self.bx + math.sin(self.t * 2.5) * 18, 30, W - 30)
+        if self.y > H + 30:
+            self.dead = True
+
+    def draw(self, s):
+        label, col, _ = self.KINDS[self.kind]
+        x, y = int(self.x), int(self.y)
+        blit_glow(s, x, y, 42, col, 70 + 25 * (int(self.t * 8) % 3))
+        pygame.draw.circle(s, (20, 12, 35), (x, y), 19)
+        pygame.draw.circle(s, col, (x, y), 19, 3)
+        draw_powerup_icon(s, self.kind, x, y, col)
+        draw_text(s, label, 20, col, center=(x, y + 33))
+
+
+def draw_powerup_icon(s, kind, x, y, col):
+    if kind == "beam":
+        pygame.draw.rect(s, (160, 215, 255), (x - 5, y - 11, 10, 22))
+        pygame.draw.rect(s, WHITE, (x - 2, y - 11, 4, 22))
+    elif kind == "shield":
+        pts = [(x - 9, y - 10), (x + 9, y - 10), (x + 9, y), (x, y + 11), (x - 9, y)]
+        pygame.draw.polygon(s, col, pts)
+        pygame.draw.line(s, (20, 12, 35), (x, y - 6), (x, y + 4), 3)
+    elif kind == "assoc":
+        # green / white / grey - the three selection states
+        a, b, c = (x - 8, y + 6), (x + 8, y + 6), (x, y - 8)
+        pygame.draw.line(s, WHITE, a, b, 2)
+        pygame.draw.line(s, WHITE, a, c, 2)
+        pygame.draw.circle(s, QLIK_GREEN, a, 5)
+        pygame.draw.circle(s, WHITE, b, 5)
+        pygame.draw.circle(s, (120, 120, 130), c, 5)
+    else:
+        pygame.draw.rect(s, WHITE, (x - 11, y - 9, 22, 15), border_radius=5)
+        pygame.draw.polygon(s, WHITE, [(x - 6, y + 5), (x - 8, y + 11), (x + 1, y + 5)])
+        for dx in (-4, 4):
+            pygame.draw.circle(s, col, (x + dx, y - 2), 2)
+
+
+class AnswersBot:
+    """Qlik Answers: a chatty helper drone that flies next to you and shoots for 10 s."""
+    LIFE = 10.0
+    QUIPS = [
+        "Hej! Jag är Qlik Answers!", "Fråga: var är spöket? Svar: DÄR!", "Enligt dina data: BU!",
+        "Källa: din egen dashboard", "Ingen hallucination - det ÄR ett spöke!", "Bra fråga! PANG!",
+        "Svaret är 42... spöken",
+    ]
+
+    def __init__(self, player):
+        self.x, self.y = player.x, player.y - 80
+        self.side = -1 if player.x > W / 2 else 1
+        self.left = self.LIFE
+        self.t = self.cool = 0.0
+        self.quips = self.QUIPS[1:]
+        random.shuffle(self.quips)
+        self.say, self.say_t, self.qi = self.QUIPS[0], 2.4, 0
+
+    def update(self, dt, game):
+        self.t += dt
+        self.left -= dt
+        p = game.player
+        if p.x < 130:
+            self.side = 1
+        elif p.x > W - 130:
+            self.side = -1
+        k = min(1.0, dt * 5)
+        self.x += (p.x + self.side * 75 - self.x) * k
+        self.y += (p.y - 85 + math.sin(self.t * 3) * 8 - self.y) * k
+        self.say_t -= dt
+        if self.left < 1.6 and self.say != "Hej då! Fler frågor?":
+            self.say, self.say_t = "Hej då! Fler frågor?", 1.6
+        elif self.say_t < -0.8 and self.left > 3:
+            self.say, self.say_t = self.quips[self.qi % len(self.quips)], 2.2
+            self.qi += 1
+        self.cool -= dt
+        if self.cool > 0:
+            return
+        targets = [e for e in game.enemies if e.active() and not e.dead and e.y < self.y - 30]
+        if targets:
+            urgent = [e for e in targets if e.y > 300]
+            boss = [e for e in targets if e.boss]
+            t = max(urgent or boss or targets, key=lambda e: e.y)
+            dx, dy = t.x - self.x, t.y - self.y
+            d = math.hypot(dx, dy) or 1
+            game.bullets.append(Bullet(self.x, self.y - 14, dx / d * 720, dy / d * 720, kind="bot"))
+            self.cool = 0.22
+            game.sfx.play("blip")
+
+    def draw(self, s):
+        if self.left < 2 and int(self.t * 12) % 2 == 0:
+            return
+        x, y = int(self.x), int(self.y)
+        blit_glow(s, x, y, 44, ANSWERS, 70)
+        fl = random.randint(6, 12)
+        pygame.draw.polygon(s, (120, 200, 255), [(x - 6, y + 16), (x + 6, y + 16), (x, y + 16 + fl)])
+        pygame.draw.line(s, (200, 200, 220), (x, y - 16), (x, y - 25), 2)
+        pygame.draw.circle(s, RED if int(self.t * 3) % 2 else ANSWERS, (x, y - 26), 4)
+        pygame.draw.rect(s, (235, 235, 250), (x - 23, y - 16, 46, 32), border_radius=10)
+        pygame.draw.polygon(s, (235, 235, 250), [(x - 14 * self.side, y + 12), (x - 20 * self.side, y + 22),
+                                                 (x - 4 * self.side, y + 14)])
+        pygame.draw.rect(s, (30, 20, 55), (x - 17, y - 10, 34, 20), border_radius=6)
+        blink = int(self.t * 10) % 25 == 0
+        for dx in (-7, 7):
+            if blink:
+                pygame.draw.line(s, (120, 230, 255), (x + dx - 3, y), (x + dx + 3, y), 2)
+            else:
+                pygame.draw.circle(s, (120, 230, 255), (x + dx, y - 1), 4)
+        pygame.draw.arc(s, (120, 230, 255), (x - 6, y + 1, 12, 7), math.pi, 2 * math.pi, 2)
+        if self.say_t > 0:
+            img = render(self.say, 22, (30, 20, 55))
+            box = img.get_rect()
+            box.inflate_ip(14, 8)
+            box.midbottom = (int(clamp(x, box.width / 2 + 6, W - box.width / 2 - 6)), y - 34)
+            pygame.draw.rect(s, WHITE, box, border_radius=8)
+            pygame.draw.rect(s, ANSWERS, box, 2, border_radius=8)
+            s.blit(img, img.get_rect(center=box.center))
 
 
 class ErrorBlob:
     """Spreadsheet errors spat out by the Table-Ghoul."""
+    shootable = False
     TEXTS = ["#REFERENS!", "#SAKNAS!", "#DIVISION/0!", "#VÄRDEFEL!"]  # Swedish Excel
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, texts=None, color=RED):
         self.x, self.y = x, y
-        self.text = random.choice(self.TEXTS)
-        self.t = 0.0
+        self.text = random.choice(texts or self.TEXTS)
+        self.color = color
+        self.t = random.uniform(0, 1)
         self.dead = False
 
     def update(self, dt):
@@ -503,8 +791,8 @@ class ErrorBlob:
             self.dead = True
 
     def draw(self, s):
-        blit_glow(s, self.x, self.y, 26, RED, 90)
-        draw_text(s, self.text, 26, RED, center=(self.x, self.y))
+        blit_glow(s, self.x, self.y, 26, self.color, 90)
+        draw_text(s, self.text, 26, self.color, center=(self.x, self.y))
 
 
 # ------------------------------------------------------------------- monsters
@@ -532,6 +820,7 @@ class Enemy:
     hp = 1
     r = 20
     points = 100
+    boss = False
 
     def __init__(self, x, y):
         self.x, self.y = x, y
@@ -539,11 +828,17 @@ class Enemy:
         self.flash = 0.0
         self.dead = False
         self.hp = type(self).hp
+        # Associative Blast: ring colour (green selected / white associated / grey excluded)
+        self.mark, self.mark_t, self.frozen, self.chained = None, 0.0, 0.0, False
 
     def active(self):
         return self.y > -30
 
     def update(self, dt, game):
+        self.mark_t -= dt
+        if self.frozen > 0:  # excluded values slow to a crawl
+            self.frozen -= dt
+            dt *= 0.2
         self.t += dt
         self.flash = max(0.0, self.flash - dt)
         self.move(dt, game)
@@ -585,6 +880,7 @@ class PowerBooI(Spooker):
     tagline = "Maktgalen och full av BU"
     points = 150
     color = YELLOW
+    label = None  # copies summoned by Mega Power BOO-I carry a file name
 
     def move(self, dt, game):
         self.y += 105 * dt
@@ -594,6 +890,8 @@ class PowerBooI(Spooker):
         for i, h in enumerate((10, 16, 22)):
             pygame.draw.rect(s, (200, 150, 0), (int(self.x) - 12 + i * 9, int(self.y - self.r * 1.15) - h + 4, 6, h))
         super().draw(s)
+        if self.label:
+            draw_text(s, self.label, 18, YELLOW, center=(self.x, self.y + self.r + 14))
 
 
 class Airbite(Enemy):
@@ -911,6 +1209,443 @@ class TrainCar(Enemy):
             pygame.draw.circle(s, (120, 120, 130), (x + side * 14, y + 17), 6, 2)
 
 
+class SlopSpot(Enemy):
+    """A hopping slime that splits in two when shot (big -> medium -> small)."""
+    name = "SLOPSPOT"
+    tagline = "Sök efter insikter. Hitta slem."
+    SIZES = {3: (26, 150), 2: (19, 100), 1: (13, 75)}  # size: (radius, points)
+
+    def __init__(self, x, y, size=3, vx=0.0):
+        super().__init__(x, y)
+        self.size = size
+        self.r, self.points = self.SIZES[size]
+        self.vx = vx
+        self.pop = -140.0 if vx else 0.0  # children jump up a little when they split off
+
+    def move(self, dt, game):
+        self.pop = min(0.0, self.pop + 300 * dt)
+        hop = max(0.0, math.sin(self.t * 5)) * 70
+        self.y += (60 + hop + self.pop) * dt
+        self.x += self.vx * dt
+        self.vx *= max(0.0, 1 - 1.5 * dt)
+        if not 20 < self.x < W - 20:
+            self.vx = -self.vx
+            self.x = clamp(self.x, 20, W - 20)
+
+    def split(self, game):
+        if self.size > 1:
+            for side in (-1, 1):
+                game.add_enemy(SlopSpot(self.x + side * 8, self.y, self.size - 1, side * 160))
+            game.sfx.play("splat")
+
+    def draw(self, s):
+        x, y, r = self.x, self.y, self.r
+        sq = 1 + 0.15 * math.sin(self.t * 10)
+        w, h = r * 2 * sq, r * 1.7 / sq
+        col = WHITE if self.flash > 0 else (235, 85, 175)
+        blit_glow(s, x, y, int(r * 1.7), (235, 85, 175), 45)
+        for k, dx in enumerate((-0.5, 0.1, 0.55)):
+            dl = r * (0.35 + 0.25 * abs(math.sin(self.t * 2 + k)))
+            pygame.draw.line(s, col, (x + dx * r, y), (x + dx * r, y + h / 2 + dl), max(2, r // 5))
+            pygame.draw.circle(s, col, (int(x + dx * r), int(y + h / 2 + dl)), max(2, r // 6))
+        pygame.draw.ellipse(s, col, (x - w / 2, y - h / 2, w, h))
+        pygame.draw.ellipse(s, (255, 170, 220), (x - w * 0.32, y - h * 0.38, w * 0.25, h * 0.2))
+        for side, er in ((-1, 0.27), (1, 0.2)):  # googly eyes of different sizes
+            ex, ey = int(x + side * r * 0.38), int(y - h * 0.08)
+            pygame.draw.circle(s, WHITE, (ex, ey), int(r * er) + 1)
+            pygame.draw.circle(s, (20, 10, 35), (ex + int(math.sin(self.t * 3) * 2), ey + 1), max(1, int(r * er * 0.5)))
+        pygame.draw.arc(s, (90, 10, 60), (x - r * 0.35, y + h * 0.05, r * 0.7, h * 0.3), math.pi, 2 * math.pi, 2)
+        if self.size == 3:  # a magnifying glass, it's a search slime
+            gx, gy = int(x + r * 1.05), int(y - r * 0.15)
+            pygame.draw.line(s, (120, 80, 50), (gx + 4, gy + 5), (gx + 11, gy + 14), 4)
+            pygame.draw.circle(s, (200, 230, 255), (gx, gy), 7)
+            pygame.draw.circle(s, (90, 90, 110), (gx, gy), 7, 2)
+
+
+class Boomoo(Enemy):
+    """Exploding pumpkin-cow. Shoot it and it takes its neighbours with it;
+    let it get low and it moos, swells up and blows up by itself."""
+    name = "BOOMOO"
+    tagline = "Mu-hahaha! Spränger dina dashboards"
+    r = 24
+    points = 200
+    BLAST = 115
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.bx = clamp(x, 60, W - 60)
+        self.vy = random.uniform(55, 75)
+        self.fuse = None
+
+    def move(self, dt, game):
+        if self.fuse is None:
+            self.y += self.vy * dt
+            self.x = self.bx + math.sin(self.t * 1.6) * 40
+            if game.state == "playing" and self.y > H - 260:
+                self.fuse = 1.3
+                game.sfx.play("moo")
+                game.add_float(self.x, self.y - 50, "MUUU!", ORANGE, 34)
+        else:
+            self.fuse -= dt
+            if self.fuse <= 0:
+                game.blast(self, by_player=False)
+
+    def draw(self, s):
+        armed = self.fuse is not None
+        sw = 1 + (0.25 * (1 - self.fuse / 1.3) + 0.06 * math.sin(self.t * 40) if armed else 0)
+        r = self.r * sw
+        x, y = self.x, self.y
+        blink = armed and int(self.t * (8 + 20 * (1 - self.fuse / 1.3))) % 2 == 0
+        fl = self.flash > 0
+        body = WHITE if fl else RED if blink else ORANGE
+        dark = WHITE if fl else (150, 40, 20) if blink else (200, 90, 10)
+        if armed:
+            blit_glow(s, x, y, int(self.BLAST * 0.8), RED, 50)
+        blit_glow(s, x, y, int(r * 1.8), ORANGE, 55)
+        for side in (-1, 1):
+            pygame.draw.polygon(s, (240, 230, 200), [(x + side * r * 0.45, y - r * 0.65), (x + side * r * 1.0, y - r * 1.25),
+                                                     (x + side * r * 0.75, y - r * 0.55)])
+            pygame.draw.ellipse(s, (240, 150, 170), (x + side * r * 1.05 - r * 0.25, y - r * 0.45, r * 0.5, r * 0.3))
+        for dx in (-0.4, 0.4):  # pumpkin lobes
+            pygame.draw.ellipse(s, dark, (x + dx * r - r * 0.6, y - r * 0.8, r * 1.2, r * 1.6))
+        pygame.draw.ellipse(s, body, (x - r * 0.55, y - r * 0.84, r * 1.1, r * 1.68))
+        if not fl:  # cow spots
+            pygame.draw.ellipse(s, (40, 20, 20), (x - r * 0.85, y - r * 0.55, r * 0.45, r * 0.35))
+            pygame.draw.ellipse(s, (40, 20, 20), (x + r * 0.45, y + r * 0.05, r * 0.35, r * 0.4))
+        for side in (-1, 1):
+            pygame.draw.polygon(s, (40, 10, 0), [(x + side * r * 0.15, y - r * 0.15), (x + side * r * 0.55, y - r * 0.15),
+                                                 (x + side * r * 0.35, y - r * 0.45)])
+        pygame.draw.ellipse(s, (245, 160, 180), (x - r * 0.45, y + r * 0.1, r * 0.9, r * 0.5))
+        for side in (-1, 1):
+            pygame.draw.circle(s, (120, 40, 60), (int(x + side * r * 0.2), int(y + r * 0.35)), max(2, int(r * 0.08)))
+        # fuse on top
+        fx, fy = x + r * 0.1, y - r * 0.8
+        pygame.draw.line(s, (90, 70, 40), (fx, fy), (fx + 5, fy - 9), 3)
+        if int(self.t * 20) % 2 or armed:
+            blit_glow(s, fx + 5, fy - 10, 12, YELLOW, 160)
+        pygame.draw.circle(s, YELLOW, (int(fx + 5), int(fy - 10)), 3)
+
+
+class SickSense(Enemy):
+    """Sickly psychic eyeball ghost: teleports around and sneezes slime at you."""
+    name = "SICK-SENSE"
+    tagline = "Jag ser döda dashboards..."
+    hp = 2
+    r = 24
+    points = 250
+    TP = 0.7  # teleport takes this long (fade out, move, fade in)
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.bx = x
+        self.tp, self.tp_wait, self.dest = 0.0, random.uniform(1.6, 2.4), (x, y)
+        self.sneeze = random.uniform(2.0, 3.0)
+        self.look = 0.0
+
+    def fade(self):
+        return clamp(abs(self.tp - self.TP / 2) / (self.TP / 2), 0, 1) if self.tp > 0 else 1.0
+
+    def active(self):
+        return self.y > -30 and self.fade() > 0.5  # can't be hit mid-teleport
+
+    def move(self, dt, game):
+        if game.player and game.state == "playing":
+            self.look = clamp((game.player.x - self.x) / 200, -1, 1)
+        if self.tp > 0:
+            half = self.tp > self.TP / 2
+            self.tp -= dt
+            if half and self.tp <= self.TP / 2:
+                self.bx, self.y = self.dest
+        else:
+            self.y += 40 * dt
+            self.tp_wait -= dt
+            if self.tp_wait <= 0 and 20 < self.y < H - 300:
+                self.tp, self.tp_wait = self.TP, random.uniform(1.8, 2.8)
+                self.dest = (random.uniform(60, W - 60), min(self.y + random.uniform(20, 80), H - 280))
+                if game.state == "playing":
+                    game.sfx.play("teleport")
+        self.x = self.bx + math.sin(self.t * 1.5) * 20
+        if game.state != "playing" or self.tp > 0:
+            return
+        self.sneeze -= dt
+        if self.sneeze <= 0 and 40 < self.y < H - 240:
+            vx = clamp((game.player.x - self.x) * 0.4, -120, 120)
+            game.blobs.append(SlimeBlob(self.x, self.y + 22, vx))
+            game.add_float(self.x, self.y - 40, "ATJO!", SICK, 30, life=0.8)
+            game.sfx.play("sneeze")
+            self.sneeze = random.uniform(2.6, 4.0)
+
+    def draw(self, s):
+        if self.tp > 0:  # shimmer where it is going to appear
+            dx, dy = self.dest
+            for k in range(3):
+                rr = int(8 + 10 * k + 6 * math.sin(self.t * 12 + k))
+                pygame.draw.circle(s, SICK, (int(dx), int(dy)), rr, 1)
+        a = self.fade()
+        if a < 0.1:
+            return
+        x, y = int(self.x), int(self.y)
+        r = int(self.r * (0.3 + 0.7 * a))
+        fl = self.flash > 0
+        blit_glow(s, x, y, int(r * 2), SICK, 50)
+        # ghostly wisps
+        pts = [(x - r * 0.8, y)]
+        for i in range(7):
+            px = x - r * 0.8 + r * 1.6 * i / 6
+            pts.append((px, y + r * 1.4 + (6 if i % 2 else -2) + 4 * math.sin(self.t * 7 + i)))
+        pts.append((x + r * 0.8, y))
+        pygame.draw.polygon(s, WHITE if fl else (110, 160, 45), pts)
+        pygame.draw.circle(s, WHITE if fl else (225, 235, 175), (x, y), r)
+        if fl:
+            return
+        for k in range(4):  # bloodshot
+            ang = 0.4 + k * 1.6
+            pygame.draw.line(s, (210, 60, 60), (x + math.cos(ang) * r * 0.95, y + math.sin(ang) * r * 0.95),
+                             (x + math.cos(ang + 0.3) * r * 0.55, y + math.sin(ang + 0.3) * r * 0.55), 1)
+        ix = int(x + self.look * r * 0.35)
+        pygame.draw.circle(s, (100, 160, 30), (ix, y + 2), int(r * 0.45))
+        pygame.draw.circle(s, (15, 10, 20), (ix, y + 2), int(r * 0.22))
+        pygame.draw.circle(s, WHITE, (ix - int(r * 0.15), y - int(r * 0.12)), max(1, int(r * 0.1)))
+        # droopy sick eyelid; it squints right before a sneeze
+        lid = 0.75 if self.sneeze < 0.6 else 0.35
+        pygame.draw.ellipse(s, (130, 175, 55), (x - r, y - r, 2 * r, int(2 * r * lid)))
+        pygame.draw.circle(s, (80, 120, 30), (x, y), r, 2)
+        if self.sneeze < 0.6 and self.y < H - 240:
+            draw_text(s, "A... a...", 22, SICK, center=(x, y - r - 16))
+
+
+def draw_loading(s, x, y, charge, text, color):
+    """Boss attack telegraph: the world's slowest loading bar. Sits at 99% for ages, of course."""
+    pct = min(99, int(charge * 160))
+    bw = 150
+    bx = x - bw // 2
+    pygame.draw.rect(s, (20, 10, 20), (bx - 2, y - 2, bw + 4, 18))
+    pygame.draw.rect(s, color, (bx, y, int(bw * min(charge, 0.99)), 14))
+    pygame.draw.rect(s, WHITE, (bx - 2, y - 2, bw + 4, 18), 2)
+    draw_text(s, "%s  %d%%" % (text, pct), 22, WHITE, center=(x, y + 30))
+
+
+class Infernomatica(Enemy):
+    """Mid-boss: a big fire demon that takes forever to load its fireballs. Times out and
+    leaves after MID_BOSS_STAY seconds if nobody beats it."""
+    name = "INFERNO-MATICA"
+    title = "Inferno-matica"
+    header = "MELLANBOSS!"
+    tagline = "Laddar... var god vänta"
+    kill_text = "INFERNO-MATICA RADERAD!"
+    kill_sub = "Laddning klar: 100%"
+    hp = 14
+    r = 60
+    points = 1000
+    boss = True
+    glow = ORANGE
+    CHARGE = 1.5
+
+    def __init__(self):
+        super().__init__(W / 2, -110)
+        self.maxhp = self.hp
+        self.mt = 0.0
+        self.wait = 1.0
+        self.charge = 0.0  # 0 = idle, else 0..1 loading
+        self.volley = 0
+        self.stay = MID_BOSS_STAY
+        self.leaving = False
+
+    def active(self):
+        return self.y > -40
+
+    def move(self, dt, game):
+        self.stay -= dt
+        if self.stay <= 0 and not self.leaving and game.state == "playing":
+            self.leaving, self.charge = True, 0.0
+            game.add_float(self.x, self.y + 90, "Timeout! Försöker igen senare...", ORANGE, 30, life=2.5)
+        if self.leaving:
+            self.y -= 160 * dt
+            if self.y < -140:
+                self.dead = True  # gone without a kill - no points
+            return
+        if self.y < 200:
+            self.y += 90 * dt
+        else:
+            self.mt += dt
+            self.x = W / 2 + math.sin(self.mt * 0.55) * (W / 2 - 150)
+        if game.state != "playing" or self.y < 160:
+            return
+        if self.charge > 0:
+            self.charge += dt / self.CHARGE
+            if self.charge >= 1:
+                self.fire(game)
+        else:
+            self.wait -= dt
+            if self.wait <= 0:
+                self.charge = 0.001
+                game.sfx.play("charge")
+
+    def fire(self, game):
+        self.charge, self.wait = 0.0, random.uniform(0.9, 1.5)
+        n = 5 if self.volley % 2 == 0 else 3
+        self.volley += 1
+        base = math.atan2(game.player.y - self.y, game.player.x - self.x)
+        for i in range(n):
+            a = base + (i - (n - 1) / 2) * 0.32
+            game.blobs.append(Fireball(self.x, self.y + 40, math.cos(a) * 210, math.sin(a) * 210))
+        game.sfx.play("fireball")
+        game.shake = max(game.shake, 5)
+
+    def draw(self, s):
+        x, y, t = int(self.x), int(self.y), self.t
+        fl = self.flash > 0
+        blit_glow(s, x, y, 130, (255, 100, 20), 70)
+        for i in range(11):  # flickering flames behind
+            a = math.pi + math.pi * i / 10
+            ln = 38 + 20 * math.sin(t * 9 + i * 1.7) + (12 if i % 2 else 0)
+            col = (RED, ORANGE, YELLOW)[i % 3]
+            pts = [(x + math.cos(a - 0.17) * 50, y + math.sin(a - 0.17) * 50),
+                   (x + math.cos(a + 0.1 * math.sin(t * 5 + i)) * (52 + ln), y + math.sin(a) * (52 + ln)),
+                   (x + math.cos(a + 0.17) * 50, y + math.sin(a + 0.17) * 50)]
+            pygame.draw.polygon(s, col, pts)
+        for side in (-1, 1):  # horns
+            pygame.draw.polygon(s, (50, 20, 25), [(x + side * 30, y - 42), (x + side * 72, y - 100),
+                                                  (x + side * 50, y - 40)])
+        pygame.draw.circle(s, WHITE if fl else (150, 25, 15), (x, y), 58)
+        if fl:
+            return
+        pygame.draw.ellipse(s, (195, 55, 20), (x - 40, y - 8, 80, 60))
+        for side in (-1, 1):  # angry eyes and brows
+            ex = x + side * 22
+            pygame.draw.polygon(s, YELLOW, [(ex - 13, y - 18), (ex + 13, y - 18), (ex + side * 13, y - 4), (ex - side * 13, y - 10)])
+            pygame.draw.circle(s, (20, 0, 0), (ex + side * 2, y - 12), 4)
+            pygame.draw.line(s, (40, 0, 0), (x + side * 8, y - 22), (x + side * 38, y - 32), 6)
+        opn = 10 + 14 * self.charge
+        pygame.draw.ellipse(s, (60, 0, 10), (x - 30, y + 10, 60, opn + 10))
+        if self.charge > 0:
+            blit_glow(s, x, y + 18, 30, YELLOW, int(60 + 120 * self.charge))
+        for k in range(5):
+            fx = x - 24 + k * 12
+            pygame.draw.polygon(s, (245, 235, 210), [(fx, y + 11), (fx + 8, y + 11), (fx + 4, y + 19)])
+        if self.charge > 0:
+            draw_loading(s, x, y + 74, self.charge, "Laddar... var god vänta", ORANGE)
+
+
+class MegaPowerBooI(Enemy):
+    """Final boss: a giant Power BOO-I. Loads its data forever, then rains bar charts or
+    licence errors, and keeps publishing copies of itself. Loses a crown bar per 20 % HP;
+    at half HP it upgrades to Premium and speeds up."""
+    name = "MEGA POWER BOO-I"
+    title = "Mega Power BOO-I"
+    header = "BOSS UPPTÄCKT!"
+    tagline = "Nu med 47 nya visualiseringar!"
+    kill_text = "POWER BOO-I AVPUBLICERAD!"
+    kill_sub = "Uppdatering lyckades: 100%"
+    hp = 34
+    r = 60
+    points = 3000
+    boss = True
+    glow = YELLOW
+    BARS = (34, 50, 66, 50, 38)  # the crown
+    ERRORS = ["LICENS KRÄVS", "DAX?!", "MÅTT SAKNAS", "PRO KRÄVS", "OGILTIG RELATION"]
+    COPIES = ["Rapport_FINAL", "Rapport_FINAL_v2", "Kopia av Kopia (3)", "Rapport_FINAL_FINAL",
+              "Rapport (1)", "Ny rapport 7", "Rapport_ANVÄND_DENNA"]
+
+    def __init__(self):
+        super().__init__(W / 2, -120)
+        self.maxhp = self.hp
+        self.mt = 0.0
+        self.wait = 1.2
+        self.charge = 0.0
+        self.published = 0
+        self.summon = 2.0
+        self.premium = False
+        self.bars = len(self.BARS)
+        self.copies = list(self.COPIES)
+        random.shuffle(self.copies)
+
+    def active(self):
+        return self.y > -40
+
+    def move(self, dt, game):
+        if self.y < 225:  # low enough that the crown clears the HUD health bar
+            self.y += 90 * dt
+        else:
+            self.mt += dt * (1.6 if self.premium else 1.0)
+            self.x = W / 2 + math.sin(self.mt * 0.6) * (W / 2 - 150)
+            self.y = 225 + math.sin(self.mt * 2.1) * 10
+        if game.state != "playing" or self.y < 180:
+            return
+        bars = max(1, math.ceil(len(self.BARS) * self.hp / self.maxhp))
+        if bars < self.bars:  # a crown bar falls off
+            self.bars = bars
+            game.explode(self.x, self.y - self.r - 20, colors=[YELLOW, (200, 150, 0), WHITE], n=18, speed=200)
+            game.sfx.play("pop")
+        if not self.premium and self.hp <= self.maxhp / 2:
+            self.premium = True
+            self.name = "MEGA POWER BOO-I PREMIUM"  # HUD only; the class name stays for `seen`
+            self.charge, self.wait = 0.0, 2.0  # dramatic pause while it "upgrades"
+            game.add_float(W / 2, H / 2 + 80, "UPPGRADERAR TILL PREMIUM-KAPACITET!", YELLOW, 40, life=2.4)
+            game.rings.append([self.x, self.y, 20, 420, 0.5, 0.5, YELLOW])
+            game.sfx.play("roar")
+            game.shake = max(game.shake, 12)
+        self.summon -= dt
+        if self.summon <= 0:
+            self.summon = 3.6 if self.premium else 5.0
+            self.publish_copies(game)
+        if self.charge > 0:
+            self.charge += dt / (1.1 if self.premium else 1.6)
+            if self.charge >= 1:
+                self.fire(game)
+        else:
+            self.wait -= dt
+            if self.wait <= 0:
+                self.charge = 0.001
+                game.sfx.play("charge")
+
+    def publish_copies(self, game):
+        t = random.uniform(0, 6)
+        for side in (-1, 0, 1) if self.premium else (-1, 1):
+            c = PowerBooI(self.x + side * 150, self.y + 30)
+            c.t = t  # copies zig-zag in lockstep, so their labels never overlap
+            c.label = self.copies[self.published % len(self.copies)]
+            self.published += 1
+            game.add_enemy(c)
+        game.sfx.play("boo")
+
+    def fire(self, game):
+        self.charge, self.wait = 0.0, random.uniform(0.8, 1.3)
+        game.add_float(self.x, self.y + 100, "Uppdatering misslyckades!", RED, 26, life=1.0)
+        if random.random() < 0.6:  # a fan of falling bar charts, aimed at the player
+            n = 6 if self.premium else 5
+            base = math.atan2(game.player.y - self.y, game.player.x - self.x)
+            for i in range(n):
+                a = base + (i - (n - 1) / 2) * 0.3
+                game.blobs.append(Fireball(self.x, self.y + 40, math.cos(a) * 200, math.sin(a) * 200, style="bar"))
+            game.sfx.play("fireball")
+        else:  # licence errors drift down (can't be shot, dodge them)
+            for i in range(4 if self.premium else 3):
+                game.blobs.append(ErrorBlob(self.x + (i - 1) * 110, self.y + 50, self.ERRORS, YELLOW))
+            game.sfx.play("sneeze")
+        game.shake = max(game.shake, 5)
+
+    def draw(self, s):
+        x, y, t, r = int(self.x), int(self.y), self.t, self.r
+        fl = self.flash > 0
+        blit_glow(s, x, y, 130, (255, 210, 40) if self.premium else YELLOW, 80 if self.premium else 55)
+        bw = 16
+        x0 = x - (self.bars * (bw + 6) - 6) // 2
+        for i, h in enumerate(self.BARS[:self.bars]):  # bar-chart crown, one bar per 20 % HP
+            h = int(h + 4 * math.sin(t * 4 + i))
+            top = y - r - 2 - h
+            pygame.draw.rect(s, (200, 150, 0), (x0 + i * (bw + 6), top, bw, h + 14))
+            pygame.draw.rect(s, (255, 225, 90), (x0 + i * (bw + 6) + 3, top + 3, bw - 6, 6))
+        draw_ghost(s, x, y, r, YELLOW, t, fl)
+        if fl:
+            return
+        cy = y - r * 0.2
+        for side in (-1, 1):  # angry brows
+            pygame.draw.line(s, (90, 60, 0), (x + side * 8, cy - 18), (x + side * 36, cy - 28), 6)
+        if self.charge > 0:
+            draw_loading(s, x, y + r + 26, self.charge, "Uppdaterar datamängd...", YELLOW)
+
+
 # ----------------------------------------------------------------------- game
 class Game:
     def __init__(self, screen, sfx, inp):
@@ -921,12 +1656,15 @@ class Game:
         self.title_img, self.drips = make_title()
         self.scores = load_scores()
         self.clock = 0.0
-        self.particles, self.floats = [], []
-        self.enemies, self.bullets, self.blobs = [], [], []
-        self.player = None
+        self.particles, self.floats, self.rings = [], [], []
+        self.enemies, self.bullets, self.blobs, self.powerups, self.chain = [], [], [], [], []
+        self.player = self.boss = self.bot = self.boss_dying = None
+        self.beam_t = self.assoc_t = 0.0
+        self.beam_on = self.shield = False
         self.shake = 0.0
         self.banner, self.banner_queue = None, []
         self.score, self.elapsed, self.kills, self.hits = 0, 0.0, 0, 0
+        self.boss_killed, self.name = [], ""
         self.attract_t = 0.0
         self.new_best, self.rank = False, ""
         self.state, self.state_t = "title", 0.0
@@ -934,13 +1672,21 @@ class Game:
 
     def set_state(self, state):
         self.state, self.state_t = state, 0.0
+        self.inp.text_mode = state == "initials"
 
     # ---- round lifecycle
     def start_round(self):
         self.enemies.clear(); self.bullets.clear(); self.blobs.clear()
+        self.powerups.clear(); self.chain.clear()
         self.player = Player()
+        self.boss = self.bot = self.boss_dying = None
+        self.beam_t = self.assoc_t = self.beam_tick = 0.0
+        self.beam_on = self.shield = False
         self.score, self.elapsed, self.kills, self.hits = 0, 0.0, 0, 0
+        self.boss_killed, self.name = [], ""
         self.spawn_t = 1.0
+        self.drop_cool = 0.0
+        self.drops_due = list(SCHEDULED_DROPS)
         self.seen, self.trains_sent = set(), set()
         self.last_tick = None
         self.banner, self.banner_queue = None, []
@@ -951,18 +1697,30 @@ class Game:
     def end_round(self):
         for e in self.enemies:
             if e.active():
-                self.explode(e.x, e.y, n=16)
+                self.explode(e.x, e.y, n=60 if e.boss else 16)
         self.enemies.clear(); self.blobs.clear(); self.bullets.clear()
+        self.powerups.clear(); self.chain.clear()
+        self.boss = self.bot = self.boss_dying = None
+        self.beam_on = False
+        self.sfx.beam(False)
         self.banner, self.banner_queue = None, []
         self.sfx.play("explode")
         self.sfx.play("over")
         self.sfx.start_drone()
         self.shake = 10
-        best = self.scores[0] if self.scores else 0
+        best = self.scores[0][0] if self.scores else 0
         self.new_best = self.score > 0 and self.score > best
-        self.scores = sorted(self.scores + [self.score], reverse=True)[:10]
-        save_scores(self.scores)
         self.rank = rank_for(self.score)
+        if self.score > 0 and (len(self.scores) < 10 or self.score > self.scores[-1][0]):
+            self.letters, self.cur, self.last_fire, self.rep, self.idle = [], 0, -9.0, 0.0, 0.0
+            self.set_state("initials")
+        else:
+            self.set_state("over")
+
+    def save_score(self, name):
+        self.name = name
+        self.scores = sorted(self.scores + [(self.score, name)], key=lambda s: -s[0])[:10]
+        save_scores(self.scores)
         self.set_state("over")
 
     # ---- update
@@ -975,21 +1733,76 @@ class Game:
             self.update_title(dt)
         elif self.state == "playing":
             self.update_play(dt)
+        elif self.state == "initials":
+            self.update_initials(dt)
         else:
             self.update_over(dt)
+        self.inp.typed.clear()
         self.update_effects(dt)
 
     def update_title(self, dt):
         self.attract_t -= dt
         if self.attract_t <= 0:
             self.attract_t = random.uniform(0.6, 1.4) / wide_factor()
-            cls = random.choice([Spooker, Spooker, Airbite, PowerBooI])
+            cls = random.choice([Spooker, Spooker, Airbite, PowerBooI, SlopSpot, SickSense])
             self.enemies.append(cls(random.uniform(60, W - 60), -40))
         for e in self.enemies:
             e.update(dt, self)
         self.enemies = [e for e in self.enemies if not e.dead]
         if self.inp.any_pressed and self.state_t > 0.5:
             self.start_round()
+
+    def update_initials(self, dt):
+        """3 slots. LEFT/RIGHT cycle the letter (hold to repeat), FIRE confirms it,
+        FIRE twice quickly skips. A keyboard can type letters directly (Backspace undoes)."""
+        inp = self.inp
+        if self.state_t < 1.0:  # ignore button mashing left over from the round
+            return
+        self.idle += dt
+        if self.idle > 25:  # walked away: keep whatever was entered
+            self.save_score("".join(self.letters))
+            return
+        for ch in inp.typed:
+            self.idle = 0.0
+            if ch == "\b":
+                if self.letters:
+                    self.cur = ALPHABET.index(self.letters.pop())
+            else:
+                self.letters.append(ch)
+                self.cur = ALPHABET.index(ch)
+                self.sfx.play("blip")
+                if len(self.letters) == 3:
+                    self.save_score("".join(self.letters))
+                    self.sfx.play("bonus")
+                    return
+        if inp.fire_pressed:
+            self.idle = 0.0
+            if self.state_t - self.last_fire < 0.35:
+                self.save_score("")
+                self.sfx.play("pop")
+                return
+            self.last_fire = self.state_t
+            self.letters.append(ALPHABET[self.cur])
+            self.sfx.play("blip")
+            if len(self.letters) == 3:
+                self.save_score("".join(self.letters))
+                self.sfx.play("bonus")
+                return
+        d = (1 if inp.right else 0) - (1 if inp.left else 0)
+        if inp.left_pressed or inp.right_pressed:
+            self.rep = 0.4
+        elif d:
+            self.rep -= dt
+            if self.rep > 0:
+                d = 0
+            else:
+                self.rep = 0.09
+        else:
+            d = 0
+        if d:
+            self.idle = 0.0
+            self.cur = (self.cur + d) % len(ALPHABET)
+            self.sfx.play("tick")
 
     def update_over(self, dt):
         if self.state_t > 3.0 and self.inp.any_pressed:
@@ -1010,16 +1823,19 @@ class Game:
                 self.sfx.play("tick")
         self.spawn(dt)
         self.player.update(dt, self.inp, self)
+        self.update_powers(dt)
         for b in self.bullets:
             b.update(dt)
         for e in self.enemies:
             e.update(dt, self)
         for b in self.blobs:
             b.update(dt)
+        self.update_chain(dt)
         self.collide()
         self.bullets = [b for b in self.bullets if not b.dead]
         self.enemies = [e for e in self.enemies if not e.dead]
         self.blobs = [b for b in self.blobs if not b.dead]
+        self.powerups = [pu for pu in self.powerups if not pu.dead]
 
     def spawn(self, dt):
         el = self.elapsed
@@ -1027,18 +1843,34 @@ class Game:
             if el >= at and at not in self.trains_sent:
                 self.trains_sent.add(at)
                 self.spawn_train()
+        for at, cls in ((MID_BOSS_TIME, Infernomatica), (BOSS_TIME, MegaPowerBooI)):
+            if el >= at and cls.name not in self.seen and (self.boss is None or self.boss.dead):
+                self.spawn_boss(cls)
+        for due in list(self.drops_due):
+            if el >= due[0]:
+                self.drops_due.remove(due)
+                self.powerups.append(PowerUp(random.uniform(W * 0.3, W * 0.7), -20, due[1]))
         self.spawn_t -= dt
         if self.spawn_t > 0:
             return
+        boss = self.boss is not None and not self.boss.dead
         interval = max(0.40, 1.2 - el * 0.009) / wide_factor()  # same density on wide screens
+        if boss:
+            interval *= 2.0  # give the player room to fight the boss
         self.spawn_t = interval * random.uniform(0.7, 1.3)
         pool = [(Spooker, 5)]
         if el > 6:
             pool.append((Airbite, 3))
-        if el > 16:
+        if el > 12:
+            pool.append((SlopSpot, 2.5))
+        if el > 18:
             pool.append((PowerBooI, 4))
-        if el > 26:
+        if el > 26 and not boss:
             pool.append((TableGhoul, 1.5))
+        if el > 42:
+            pool.append((Boomoo, 2))
+        if el > 52 and not boss:
+            pool.append((SickSense, 2))
         cls = random.choices([c for c, _ in pool], [w for _, w in pool])[0]
         self.add_enemy(cls(random.uniform(50, W - 50), -40))
 
@@ -1049,12 +1881,140 @@ class Game:
             self.add_enemy(TrainCar(i, group, phase, amp))
         self.sfx.play("whistle")
 
+    def spawn_boss(self, cls):
+        self.boss = cls()
+        self.seen.add(self.boss.name)
+        self.add_enemy(self.boss)
+        self.banner = [self.boss.header, self.boss.name, self.boss.tagline, 3.0, RED, 330]  # below the boss
+        self.sfx.play("roar")
+        self.shake = 12
+
     def add_enemy(self, e):
         self.enemies.append(e)
         if e.name not in self.seen:
             self.seen.add(e.name)
             self.banner_queue.append((e.name, e.tagline))
 
+    # ---- power-ups
+    def update_powers(self, dt):
+        p = self.player
+        self.drop_cool -= dt
+        self.beam_t = max(0.0, self.beam_t - dt)
+        self.assoc_t = max(0.0, self.assoc_t - dt)
+        self.sfx.beam(self.beam_on)
+        if self.beam_on:
+            self.beam_tick -= dt
+            if self.beam_tick <= 0:
+                self.beam_tick = 0.09
+                for e in list(self.enemies):
+                    if not e.dead and e.active() and abs(e.x - p.x) < e.r + 20 and e.y < p.y:
+                        self.damage(e, 0.5 if e.boss else 1)
+                for bl in self.blobs:
+                    if abs(bl.x - p.x) < 26 and bl.y < p.y:
+                        bl.dead = True
+        if self.bot:
+            self.bot.update(dt, self)
+            if self.bot.left <= 0:
+                self.explode(self.bot.x, self.bot.y, colors=[ANSWERS, WHITE], n=14, speed=150)
+                self.bot = None
+        if self.boss_dying:
+            bd = self.boss_dying
+            bd[2] -= dt
+            if int(bd[2] / 0.07) != int((bd[2] + dt) / 0.07):
+                self.explode(bd[0] + random.uniform(-60, 60), bd[1] + random.uniform(-50, 50), n=18)
+                self.sfx.play("explode")
+            if bd[2] <= 0:
+                self.explode(bd[0], bd[1], n=140, speed=420)
+                self.rings.append([bd[0], bd[1], 20, 520, 0.7, 0.7, bd[3]])
+                self.sfx.play("boom")
+                self.shake = 20
+                self.boss_dying = None
+        for pu in self.powerups:
+            pu.update(dt)
+            if (pu.x - p.x) ** 2 + (pu.y - p.y) ** 2 < 44 ** 2:
+                pu.dead = True
+                self.take_powerup(pu.kind)
+
+    def maybe_drop(self, e):
+        if e.boss or e.chained or self.drop_cool > 0 or len(self.powerups) >= 2:
+            return
+        if random.random() >= (0.35 if isinstance(e, TableGhoul) else 0.07):
+            return
+        kinds = ["beam", "shield"] + (["assoc", "bot"] if self.elapsed >= LATE_POWERUPS else [])
+        self.powerups.append(PowerUp(e.x, e.y, random.choice(kinds)))
+        self.drop_cool = 5.0
+
+    def take_powerup(self, kind):
+        p = self.player
+        _, col, text = PowerUp.KINDS[kind]
+        if kind == "beam":
+            self.beam_t = 5.0
+        elif kind == "shield":
+            self.shield = True
+        elif kind == "assoc":
+            self.assoc_t = 8.0
+            self.add_float(W / 2, H / 2 + 40, "Skjut ett spöke - alla associerade poppar!", WHITE, 28, life=2.2)
+        else:
+            self.bot = AnswersBot(p)
+            self.sfx.play("hello")
+        self.add_float(W / 2, H / 2, text, col, 40, life=2.0)
+        self.explode(p.x, p.y - 10, colors=[col, WHITE], n=24, speed=200)
+        self.rings.append([p.x, p.y, 10, 300, 0.4, 0.4, col])
+        self.sfx.play("powerup")
+
+    def associate(self, e):
+        """Qlik Engine Associative Blast: the hit ghost is selected (green), ghosts of the
+        same type are associated (white) and chain-pop, the rest are excluded (grey) and stall."""
+        if e.boss:
+            self.damage(e, 2)
+            return
+        others = [o for o in self.enemies if o is not e and not o.dead and o.active() and not o.boss and not o.chained]
+        dist = lambda o: (o.x - e.x) ** 2 + (o.y - e.y) ** 2  # noqa: E731
+        assoc = [o for o in others if type(o) is type(e)]
+        if len(assoc) < 3:  # always pop at least a few
+            assoc += sorted((o for o in others if o not in assoc), key=dist)[:3 - len(assoc)]
+        assoc.sort(key=dist)
+        fx, fy = e.x, e.y
+        for i, o in enumerate(assoc):
+            o.mark, o.mark_t, o.frozen, o.chained = WHITE, 9.0, 9.0, True
+            self.chain.append([0.18 + i * 0.13, o, fx, fy])
+            fx, fy = o.x, o.y
+        for o in others:
+            if o not in assoc:
+                o.mark, o.mark_t, o.frozen = (120, 120, 130), 1.6, 1.6
+        self.rings.append([e.x, e.y, 10, 380, 0.5, 0.5, QLIK_GREEN])
+        self.add_float(e.x, e.y - 30, "VALD!", QLIK_GREEN, 30, life=0.8)
+        self.kill(e)
+
+    def update_chain(self, dt):
+        for link in self.chain:
+            link[0] -= dt
+            o = link[1]
+            if link[0] <= 0 and not o.dead:
+                self.add_float(o.x, o.y - 24, "ASSOCIERAD!", WHITE, 22, life=0.7)
+                self.rings.append([o.x, o.y, 6, 200, 0.3, 0.3, QLIK_GREEN])
+                self.sfx.play("pop")
+                self.kill(o)
+        self.chain = [c for c in self.chain if c[0] > 0 and not c[1].dead]
+
+    def blast(self, e, by_player):
+        """A Boomoo goes off. Shot by the player it kills its neighbours (and hurts the
+        boss); going off by itself it can scare the player instead."""
+        e.dead = True
+        self.explode(e.x, e.y, colors=[ORANGE, YELLOW, RED, WHITE], n=50, speed=340)
+        self.rings.append([e.x, e.y, 10, 500, 0.35, 0.35, ORANGE])
+        self.sfx.play("boom")
+        self.shake = max(self.shake, 12)
+        if by_player:
+            for o in list(self.enemies):
+                if not o.dead and o.active() and (o.x - e.x) ** 2 + (o.y - e.y) ** 2 < (Boomoo.BLAST + o.r) ** 2:
+                    self.damage(o, 4 if o.boss else 99)
+        else:
+            p = self.player
+            if p.inv <= 0 and (p.x - e.x) ** 2 + (p.y - e.y) ** 2 < (Boomoo.BLAST + 16) ** 2:
+                self.player_hit()
+
+    # ---- collisions and scoring
     def collide(self):
         p = self.player
         for b in self.bullets:
@@ -1063,14 +2023,23 @@ class Game:
                     continue
                 if (b.x - e.x) ** 2 + (b.y - e.y) ** 2 < (e.r + 6) ** 2:
                     b.dead = True
-                    if e.hit():
-                        self.kill(e)
+                    if b.kind == "sel":
+                        self.associate(e)
                     else:
-                        self.explode(b.x, b.y, colors=[WHITE, QLIK_LIGHT], n=5, speed=120)
+                        self.damage(e, 1, spark=(b.x, b.y))
+                    break
+            if b.dead:
+                continue
+            for bl in self.blobs:
+                if bl.shootable and not bl.dead and (b.x - bl.x) ** 2 + (b.y - bl.y) ** 2 < 18 ** 2:
+                    b.dead = bl.dead = True
+                    self.score += 25
+                    self.explode(bl.x, bl.y, colors=[ORANGE, YELLOW], n=10, speed=150)
+                    self.add_float(bl.x, bl.y, "+25", ORANGE, 24, life=0.6)
                     break
         if p.inv <= 0:
             for e in self.enemies:
-                if not e.dead and e.active() and (p.x - e.x) ** 2 + (p.y - e.y) ** 2 < (e.r + 16) ** 2:
+                if not e.dead and not e.boss and e.active() and (p.x - e.x) ** 2 + (p.y - e.y) ** 2 < (e.r + 16) ** 2:
                     e.dead = True
                     self.explode(e.x, e.y, n=14)
                     self.player_hit()
@@ -1082,7 +2051,19 @@ class Game:
                     self.player_hit()
                     break
 
+    def damage(self, e, n, spark=None):
+        if e.dead:
+            return
+        e.hp -= n
+        e.flash = 0.08
+        if e.hp <= 0:
+            self.kill(e)
+        elif spark:
+            self.explode(spark[0], spark[1], colors=[WHITE, QLIK_LIGHT], n=5, speed=120)
+
     def kill(self, e):
+        if isinstance(e, Boomoo) and not e.dead:
+            self.blast(e, by_player=True)
         e.dead = True
         self.kills += 1
         self.score += e.points
@@ -1092,15 +2073,37 @@ class Game:
         self.add_float(e.x, e.y - 10, "+%d" % e.points, QLIK_LIGHT, 30)
         if random.random() < 0.22:
             self.add_float(e.x, e.y + 20, random.choice(KILL_QUIPS), WHITE, 24)
+        if isinstance(e, SlopSpot):
+            e.split(self)
         if isinstance(e, TrainCar):
             e.group["killed"] += 1
             if e.group["killed"] == 5:
                 self.score += 500
                 self.add_float(W / 2, H / 2, "TÅGKRASCH!  +500", YELLOW, 52, life=2.2)
                 self.sfx.play("bonus")
+        if e.boss:
+            self.boss_killed.append(e.title)
+            self.boss_dying = [e.x, e.y, 1.4, e.glow]
+            for bl in self.blobs:
+                bl.dead = True
+                self.explode(bl.x, bl.y, colors=[GREY], n=6, speed=80)
+            self.add_float(W / 2, H / 2 - 40, "%s  +%d" % (e.kill_text, e.points), YELLOW, 46, life=3.0)
+            self.add_float(W / 2, H / 2 + 10, e.kill_sub, WHITE, 30, life=3.0)
+            self.sfx.play("roar")
+            self.sfx.play("bonus")
+            self.shake = 16
+        self.maybe_drop(e)
 
     def player_hit(self):
         p = self.player
+        if self.shield:
+            self.shield = False
+            p.inv = 1.0
+            self.sfx.play("shield")
+            self.explode(p.x, p.y, colors=[YELLOW, WHITE], n=20)
+            self.rings.append([p.x, p.y, 30, 260, 0.35, 0.35, YELLOW])
+            self.add_float(p.x, p.y - 60, "SKÖLDEN HÖLL!", YELLOW, 30)
+            return
         p.inv = 1.6
         self.hits += 1
         self.score = max(0, self.score - HIT_PENALTY)
@@ -1138,27 +2141,43 @@ class Game:
             f[1] -= 40 * dt
             f[4] -= dt
         self.floats = [f for f in self.floats if f[4] > 0]
+        for r in self.rings:
+            r[2] += r[3] * dt
+            r[4] -= dt
+        self.rings = [r for r in self.rings if r[4] > 0]
         if self.banner:
-            self.banner[2] -= dt
-            if self.banner[2] <= 0:
+            self.banner[3] -= dt
+            if self.banner[3] <= 0:
                 self.banner = None
         if not self.banner and self.banner_queue and self.state == "playing":
             name, tag = self.banner_queue.pop(0)
-            self.banner = [name, tag, 2.6]
+            self.banner = ["NYTT SPÖKE UPPTÄCKT", name, tag, 2.6, ORANGE, 110]
             self.sfx.play("boo")
 
     # ---- draw
     def draw(self):
         w = self.world
+        playing = self.state == "playing"
         self.bg.draw(w)
         for e in self.enemies:
             e.draw(w)
+        for _, o, fx, fy in self.chain:  # association links
+            pygame.draw.line(w, QLIK_GREEN, (int(fx), int(fy)), (int(o.x), int(o.y)), 3)
+        for e in self.enemies:
+            if e.mark and e.mark_t > 0:
+                pygame.draw.circle(w, e.mark, (int(e.x), int(e.y)), int(e.r + 10), 3)
+        for pu in self.powerups:
+            pu.draw(w)
         for b in self.blobs:
             b.draw(w)
         for b in self.bullets:
             b.draw(w)
-        if self.state == "playing":
-            self.player.draw(w, self.clock)
+        if playing:
+            if self.beam_on:
+                self.draw_beam(w)
+            if self.bot:
+                self.bot.draw(w)
+            self.player.draw(w, self.clock, self.shield)
         for x, y, _, _, life, ml, col, size, kind in self.particles:
             f = life / ml
             if kind == 0:
@@ -1166,13 +2185,17 @@ class Game:
             else:
                 pygame.draw.circle(w, lerp_color(col, (15, 8, 25), 1 - f), (int(x), int(y)),
                                    int(size * (1 + (1 - f) * 2)))
+        for x, y, r, _, life, ml, col in self.rings:
+            pygame.draw.circle(w, lerp_color(col, (15, 8, 25), 1 - life / ml), (int(x), int(y)), int(r), 4)
         w.blit(self.vignette, (0, 0))
         for x, y, text, col, life, size, ml in self.floats:
             draw_text(w, text, size, col, center=(x, y))
-        if self.state == "playing":
+        if playing:
             self.draw_hud(w)
         elif self.state == "title":
             self.draw_title(w)
+        elif self.state == "initials":
+            self.draw_initials(w)
         else:
             self.draw_over(w)
         ox = oy = 0
@@ -1182,9 +2205,21 @@ class Game:
         self.screen.fill((0, 0, 0))
         self.screen.blit(w, (ox, oy))
 
+    def draw_beam(self, w):
+        p = self.player
+        x, top = int(p.x), int(p.y) - 26
+        hw = 14 + int(4 * math.sin(self.clock * 50))
+        pygame.draw.rect(w, (30, 90, 200), (x - hw - 6, 0, 2 * hw + 12, top))
+        pygame.draw.rect(w, (90, 170, 255), (x - hw, 0, 2 * hw, top))
+        pygame.draw.rect(w, WHITE, (x - 4, 0, 8, top))
+        blit_glow(w, x, top, 40, (90, 170, 255), 160)
+        for _ in range(3):
+            sy = random.uniform(0, top)
+            pygame.draw.circle(w, WHITE, (x + random.randint(-hw - 8, hw + 8), int(sy)), 2)
+
     def draw_hud(self, w):
         draw_text(w, "POÄNG %d" % self.score, 36, WHITE, topleft=(16, 12))
-        best = max(self.scores[0] if self.scores else 0, self.score)
+        best = max(self.scores[0][0] if self.scores else 0, self.score)
         draw_text(w, "REKORD %d" % best, 36, QLIK_LIGHT, topright=(W - 16, 12))
         remaining = max(0.0, ROUND_SECONDS - self.elapsed)
         sec = math.ceil(remaining)
@@ -1193,11 +2228,30 @@ class Game:
             draw_text(w, str(sec), int(56 + 22 * pulse), RED, center=(W / 2, 36))
         else:
             draw_text(w, str(sec), 52, WHITE, center=(W / 2, 32))
+        # active power-ups under the score
+        y = 52
+        for label, left, total, col in (("STRÅLE", self.beam_t, 5.0, (90, 170, 255)),
+                                        ("ASSOCIATIV", self.assoc_t, 8.0, QLIK_GREEN),
+                                        ("ANSWERS", self.bot.left if self.bot else 0, AnswersBot.LIFE, ANSWERS)):
+            if left > 0:
+                draw_text(w, label, 22, col, topleft=(16, y))
+                pygame.draw.rect(w, (40, 30, 60), (118, y + 3, 80, 10))
+                pygame.draw.rect(w, col, (118, y + 3, int(80 * left / total), 10))
+                y += 22
+        if self.shield:
+            draw_text(w, "SKÖLD", 22, YELLOW, topleft=(16, y))
+        if self.boss and not self.boss.dead and self.boss.active():
+            b = self.boss
+            bw = 340
+            draw_text(w, b.name, 24, ORANGE, center=(W / 2, 66))
+            pygame.draw.rect(w, (40, 10, 10), (W // 2 - bw // 2, 78, bw, 12))
+            pygame.draw.rect(w, RED, (W // 2 - bw // 2, 78, int(bw * max(0, b.hp) / b.maxhp), 12))
+            pygame.draw.rect(w, WHITE, (W // 2 - bw // 2, 78, bw, 12), 1)
         if self.banner:
-            name, tag, _ = self.banner
-            draw_text(w, "NYTT SPÖKE UPPTÄCKT", 26, ORANGE, center=(W / 2, 110))
-            draw_text(w, name, 64, QLIK_LIGHT, center=(W / 2, 152))
-            draw_text(w, tag, 28, WHITE, center=(W / 2, 194))
+            header, name, tag, _, col, y = self.banner
+            draw_text(w, header, 26, col, center=(W / 2, y))
+            draw_text(w, name, 64, QLIK_LIGHT, center=(W / 2, y + 42))
+            draw_text(w, tag, 28, WHITE, center=(W / 2, y + 84))
 
     def draw_title(self, w):
         rect = self.title_img.get_rect(center=(W / 2, 150 + math.sin(self.clock * 1.5) * 6))
@@ -1211,24 +2265,60 @@ class Game:
         if int(self.clock * 2) % 2 == 0:
             draw_text(w, "TRYCK PÅ VALFRI KNAPP", 44, YELLOW, center=(W / 2, 320))
         draw_text(w, "VÄNSTER / HÖGER för att styra   -   MITTEN för att skjuta", 26, GREY, center=(W / 2, 362))
-        draw_text(w, "TOPPLISTA", 30, ORANGE, center=(W / 2, 412))
-        if self.scores:
-            for i, s in enumerate(self.scores[:5]):
-                draw_text(w, "%d.  %d" % (i + 1, s), 28, WHITE, center=(W / 2, 442 + i * 24))
-        else:
+        draw_text(w, "TOPPLISTA", 30, ORANGE, center=(W / 2, 410))
+        if not self.scores:
             draw_text(w, "Inga offer än...", 28, GREY, center=(W / 2, 442))
+        for i, (s, name) in enumerate(self.scores[:10]):
+            col, row = divmod(i, 5)
+            cx = W / 2 if len(self.scores) <= 5 else W / 2 + (col * 2 - 1) * 160
+            y = 428 + row * 24
+            c = YELLOW if i == 0 else WHITE
+            draw_text(w, "%d." % (i + 1), 28, GREY, topright=(int(cx - 80), y))
+            draw_text(w, name or "---", 28, c, topleft=(int(cx - 68), y))
+            draw_text(w, str(s), 28, c, topright=(int(cx + 110), y))
+
+    def draw_initials(self, w):
+        if self.new_best:
+            draw_text(w, "NYTT REKORD!", 72, YELLOW, center=(W / 2, 80))
+        else:
+            draw_text(w, "DU KOM MED PÅ TOPPLISTAN!", 60, ORANGE, center=(W / 2, 80))
+        draw_text(w, str(self.score), 90, WHITE, center=(W / 2, 160))
+        draw_text(w, "Rang: " + self.rank, 36, QLIK_LIGHT, center=(W / 2, 222))
+        draw_text(w, "SKRIV DINA INITIALER", 36, WHITE, center=(W / 2, 278))
+        n = len(self.letters)
+        for i in range(3):
+            cx = W / 2 + (i - 1) * 124
+            box = pygame.Rect(0, 0, 76, 88)
+            box.center = (int(cx), 362)
+            current = i == n and self.state_t >= 1.0
+            pygame.draw.rect(w, (25, 15, 40), box, border_radius=8)
+            pygame.draw.rect(w, QLIK_GREEN if current else (80, 70, 110), box, 4 if current else 2, border_radius=8)
+            if i < n:
+                draw_text(w, self.letters[i], 84, QLIK_LIGHT, center=box.center)
+            elif current:
+                if int(self.clock * 4) % 4:
+                    draw_text(w, ALPHABET[self.cur], 84, WHITE, center=box.center)
+                for side in (-1, 1):
+                    ax = box.centerx + side * 52
+                    pygame.draw.polygon(w, YELLOW, [(ax + side * 12, 362), (ax, 350), (ax, 374)])
+        draw_text(w, "VÄNSTER / HÖGER: byt bokstav     MITTEN: välj", 26, GREY, center=(W / 2, 438))
+        draw_text(w, "...eller skriv på tangentbordet", 26, GREY, center=(W / 2, 466))
+        draw_text(w, "Tryck MITTEN två gånger snabbt för att hoppa över", 28, YELLOW, center=(W / 2, 512))
 
     def draw_over(self, w):
         draw_text(w, "TIDEN ÄR UTE!", 84, ORANGE, center=(W / 2, 130))
         draw_text(w, str(self.score), 120, WHITE, center=(W / 2, 235))
-        draw_text(w, "POÄNG", 30, GREY, center=(W / 2, 300))
+        draw_text(w, "POÄNG" + ("  -  " + self.name if self.name else ""), 30, GREY, center=(W / 2, 300))
         draw_text(w, "Rang: " + self.rank, 42, QLIK_LIGHT, center=(W / 2, 355))
         if self.new_best and int(self.clock * 3) % 2 == 0:
-            draw_text(w, "NYTT REKORD!", 52, YELLOW, center=(W / 2, 415))
+            draw_text(w, "NYTT REKORD!", 52, YELLOW, center=(W / 2, 410))
         draw_text(w, "Monster nedskjutna: %d     Gånger skrämd: %d" % (self.kills, self.hits), 28, WHITE,
-                  center=(W / 2, 470))
+                  center=(W / 2, 458))
+        if self.boss_killed:
+            done = " besegrade!" if len(self.boss_killed) > 1 else " besegrad!"
+            draw_text(w, " + ".join(self.boss_killed) + done, 28, ORANGE, center=(W / 2, 486))
         if self.state_t > 3.0 and int(self.clock * 2) % 2 == 0:
-            draw_text(w, "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN", 32, YELLOW, center=(W / 2, 520))
+            draw_text(w, "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN", 32, YELLOW, center=(W / 2, 530))
 
 
 # ----------------------------------------------------------------------- main
@@ -1264,11 +2354,13 @@ def main():
             if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
                 pygame.quit()
                 return
+            if e.type == pygame.KEYDOWN:
+                game.inp.key_down(e)
         game.inp.poll()
         steps = FAST_FORWARD if pygame.key.get_pressed()[pygame.K_SPACE] else 1
         for i in range(steps):
             game.update(dt)
-            game.inp.any_pressed = False  # edge only counts once per frame
+            game.inp.clear_edges()  # edges only count once per frame
         game.draw()
         pygame.display.flip()
 
