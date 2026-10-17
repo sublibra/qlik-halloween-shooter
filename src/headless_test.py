@@ -99,7 +99,7 @@ def main():
             step()
             inp.set()
             step()
-        snaps = {int(s * 60) for s in (10, 30, 50, 63, 70, 78, 84)}
+        snaps = {int(s * 60) for s in (10, 30, 48, 55, 63, 70, 78, 84)}
         frame = 0
         while game.state == "playing":
             bot(game, inp)
@@ -126,9 +126,9 @@ def main():
             step()
         if rnd == 1:
             shot("game_over")
-        print("round %d: score %d  rank %-26s kills %d  hits %d  boss %s  name %r"
+        print("round %d: score %d  rank %-26s kills %d  hits %d  bosses: %s  name %r"
               % (rnd, game.score, game.rank, game.kills, game.hits,
-                 "killed" if game.boss_killed else "survived", game.name))
+                 ", ".join(game.boss_killed) or "none killed", game.name))
         # wait out the 3 s restart lock
         for _ in range(int(3.2 * 60)):
             inp.set()

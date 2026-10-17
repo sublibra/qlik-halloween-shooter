@@ -65,7 +65,8 @@ If sound goes to HDMI instead of the jack (or vice versa), pick the output with 
 - Monsters: Spooker, Airbite (dive-bombing bat), Power BOO-I (zig-zag), SlopSpot (slime that splits when shot),
   Table-Ghoul (tank, spits `#REF!` errors), Boomoo (exploding pumpkin-cow, chain-blasts its neighbours),
   Sick-Sense (teleporting eyeball that sneezes slime), Fivetrain (5-car ghost train, +500 for wrecking all cars)
-- Boss for the last 15 s: Inferno-matica, with a health bar and a very slow "Laddar..." bar before each fireball volley
+- Mid-boss at 46 s: Inferno-matica, with a very slow "Laddar..." bar before each fireball volley (leaves after 14 s if not beaten)
+- Boss for the last 15 s: Mega Power BOO-I, rains bar charts and licence errors, publishes copies of itself, upgrades to Premium at half HP
 - Power-ups dropped by kills: Pipeline beam (5 s laser), Insight Shield (absorbs one hit), and from 60 s on
   Qlik Engine Associative Blast (8 s: shot ghost turns green, associated ones chain-pop, the rest go grey)
   and Qlik Answers Bot (helper drone that shoots for 10 s). One of each of the last two always drops (62 s, 76.5 s).

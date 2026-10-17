@@ -32,7 +32,9 @@ FAST_FORWARD = 8  # game speed multiplier while SPACE is held (testing aid)
 ROUND_SECONDS = 90
 HIT_PENALTY = 100
 TRAIN_TIMES = (35, 65)  # seconds into the round when the Fivetrain arrives
-BOSS_TIME = 75  # Inferno-matica arrives for the last 15 s
+MID_BOSS_TIME = 46  # Inferno-matica drops by mid-round...
+MID_BOSS_STAY = 14  # ...and gives up ("Timeout!") if it isn't beaten by then
+BOSS_TIME = 75  # Mega Power BOO-I arrives for the last 15 s
 LATE_POWERUPS = 60  # Associative Blast and Answers Bot only drop from here on
 SCHEDULED_DROPS = ((62, "assoc"), (BOSS_TIME + 1.5, "bot"))  # everyone gets to see them
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖ"
@@ -433,7 +435,7 @@ class Background:
             pygame.draw.circle(s, (195, 195, 175), (x + cx, y + cy), r)
 
     def _graveyard(self, s):
-        labels = ["RIP", "EXCEL 97", "RIP", "LETARAD", "CSV", "RIP", "MAKRON", "RIP"]
+        labels = ["RIP", "COGNOS", "EXCEL 97", "CRYSTAL REPORTS", "LOOKER", "CSV", "BUSINESS OBJECTS", "TABLEAU", "RIP"]
         stone = (38, 28, 54)
         x = 20
         for label in labels * 2:  # repeat so wide screens are filled too
@@ -606,11 +608,12 @@ class SlimeBlob:
 
 
 class Fireball:
-    """Inferno-matica's attack. Can be shot down."""
+    """Boss attack (fireballs or bar charts). Can be shot down."""
     shootable = True
 
-    def __init__(self, x, y, vx, vy):
+    def __init__(self, x, y, vx, vy, style="fire"):
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
+        self.style = style  # "fire" (Inferno-matica) or "bar" (Mega Power BOO-I's bar charts)
         self.t = random.uniform(0, 3)
         self.dead = False
 
@@ -623,6 +626,12 @@ class Fireball:
 
     def draw(self, s):
         x, y = int(self.x), int(self.y)
+        if self.style == "bar":
+            blit_glow(s, x, y, 28, YELLOW, 90)
+            h = 22 + int(4 * math.sin(self.t * 12))
+            pygame.draw.rect(s, (200, 150, 0), (x - 8, y - h // 2, 16, h))
+            pygame.draw.rect(s, YELLOW, (x - 5, y - h // 2 + 3, 10, h - 6))
+            return
         blit_glow(s, x, y, 30, ORANGE, 110)
         for k in (3, 2, 1):
             pygame.draw.circle(s, (200, 60, 10), (int(x - self.vx * 0.025 * k), int(y - self.vy * 0.025 * k)), 9 - 2 * k)
@@ -767,10 +776,11 @@ class ErrorBlob:
     shootable = False
     TEXTS = ["#REFERENS!", "#SAKNAS!", "#DIVISION/0!", "#VÄRDEFEL!"]  # Swedish Excel
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, texts=None, color=RED):
         self.x, self.y = x, y
-        self.text = random.choice(self.TEXTS)
-        self.t = 0.0
+        self.text = random.choice(texts or self.TEXTS)
+        self.color = color
+        self.t = random.uniform(0, 1)
         self.dead = False
 
     def update(self, dt):
@@ -781,8 +791,8 @@ class ErrorBlob:
             self.dead = True
 
     def draw(self, s):
-        blit_glow(s, self.x, self.y, 26, RED, 90)
-        draw_text(s, self.text, 26, RED, center=(self.x, self.y))
+        blit_glow(s, self.x, self.y, 26, self.color, 90)
+        draw_text(s, self.text, 26, self.color, center=(self.x, self.y))
 
 
 # ------------------------------------------------------------------- monsters
@@ -870,6 +880,7 @@ class PowerBooI(Spooker):
     tagline = "Maktgalen och full av BU"
     points = 150
     color = YELLOW
+    label = None  # copies summoned by Mega Power BOO-I carry a file name
 
     def move(self, dt, game):
         self.y += 105 * dt
@@ -879,6 +890,8 @@ class PowerBooI(Spooker):
         for i, h in enumerate((10, 16, 22)):
             pygame.draw.rect(s, (200, 150, 0), (int(self.x) - 12 + i * 9, int(self.y - self.r * 1.15) - h + 4, 6, h))
         super().draw(s)
+        if self.label:
+            draw_text(s, self.label, 18, YELLOW, center=(self.x, self.y + self.r + 14))
 
 
 class Airbite(Enemy):
@@ -1401,14 +1414,31 @@ class SickSense(Enemy):
             draw_text(s, "A... a...", 22, SICK, center=(x, y - r - 16))
 
 
+def draw_loading(s, x, y, charge, text, color):
+    """Boss attack telegraph: the world's slowest loading bar. Sits at 99% for ages, of course."""
+    pct = min(99, int(charge * 160))
+    bw = 150
+    bx = x - bw // 2
+    pygame.draw.rect(s, (20, 10, 20), (bx - 2, y - 2, bw + 4, 18))
+    pygame.draw.rect(s, color, (bx, y, int(bw * min(charge, 0.99)), 14))
+    pygame.draw.rect(s, WHITE, (bx - 2, y - 2, bw + 4, 18), 2)
+    draw_text(s, "%s  %d%%" % (text, pct), 22, WHITE, center=(x, y + 30))
+
+
 class Infernomatica(Enemy):
-    """The boss: a big fire demon that takes forever to load its fireballs."""
+    """Mid-boss: a big fire demon that takes forever to load its fireballs. Times out and
+    leaves after MID_BOSS_STAY seconds if nobody beats it."""
     name = "INFERNO-MATICA"
+    title = "Inferno-matica"
+    header = "MELLANBOSS!"
     tagline = "Laddar... var god vänta"
-    hp = 32
+    kill_text = "INFERNO-MATICA RADERAD!"
+    kill_sub = "Laddning klar: 100%"
+    hp = 14
     r = 60
-    points = 2500
+    points = 1000
     boss = True
+    glow = ORANGE
     CHARGE = 1.5
 
     def __init__(self):
@@ -1418,11 +1448,22 @@ class Infernomatica(Enemy):
         self.wait = 1.0
         self.charge = 0.0  # 0 = idle, else 0..1 loading
         self.volley = 0
+        self.stay = MID_BOSS_STAY
+        self.leaving = False
 
     def active(self):
         return self.y > -40
 
     def move(self, dt, game):
+        self.stay -= dt
+        if self.stay <= 0 and not self.leaving and game.state == "playing":
+            self.leaving, self.charge = True, 0.0
+            game.add_float(self.x, self.y + 90, "Timeout! Försöker igen senare...", ORANGE, 30, life=2.5)
+        if self.leaving:
+            self.y -= 160 * dt
+            if self.y < -140:
+                self.dead = True  # gone without a kill - no points
+            return
         if self.y < 200:
             self.y += 90 * dt
         else:
@@ -1482,14 +1523,127 @@ class Infernomatica(Enemy):
         for k in range(5):
             fx = x - 24 + k * 12
             pygame.draw.polygon(s, (245, 235, 210), [(fx, y + 11), (fx + 8, y + 11), (fx + 4, y + 19)])
-        if self.charge > 0:  # telegraph: the world's slowest loading bar
-            pct = min(99, int(self.charge * 160))  # sits at 99% for ages, of course
-            bw = 150
-            bx, by = x - bw // 2, y + 74
-            pygame.draw.rect(s, (20, 10, 20), (bx - 2, by - 2, bw + 4, 18))
-            pygame.draw.rect(s, ORANGE, (bx, by, int(bw * min(self.charge, 0.99)), 14))
-            pygame.draw.rect(s, WHITE, (bx - 2, by - 2, bw + 4, 18), 2)
-            draw_text(s, "Laddar... var god vänta  %d%%" % pct, 22, WHITE, center=(x, by + 30))
+        if self.charge > 0:
+            draw_loading(s, x, y + 74, self.charge, "Laddar... var god vänta", ORANGE)
+
+
+class MegaPowerBooI(Enemy):
+    """Final boss: a giant Power BOO-I. Loads its data forever, then rains bar charts or
+    licence errors, and keeps publishing copies of itself. Loses a crown bar per 20 % HP;
+    at half HP it upgrades to Premium and speeds up."""
+    name = "MEGA POWER BOO-I"
+    title = "Mega Power BOO-I"
+    header = "BOSS UPPTÄCKT!"
+    tagline = "Nu med 47 nya visualiseringar!"
+    kill_text = "POWER BOO-I AVPUBLICERAD!"
+    kill_sub = "Uppdatering lyckades: 100%"
+    hp = 34
+    r = 60
+    points = 3000
+    boss = True
+    glow = YELLOW
+    BARS = (34, 50, 66, 50, 38)  # the crown
+    ERRORS = ["LICENS KRÄVS", "DAX?!", "MÅTT SAKNAS", "PRO KRÄVS", "OGILTIG RELATION"]
+    COPIES = ["Rapport_FINAL", "Rapport_FINAL_v2", "Kopia av Kopia (3)", "Rapport_FINAL_FINAL",
+              "Rapport (1)", "Ny rapport 7", "Rapport_ANVÄND_DENNA"]
+
+    def __init__(self):
+        super().__init__(W / 2, -120)
+        self.maxhp = self.hp
+        self.mt = 0.0
+        self.wait = 1.2
+        self.charge = 0.0
+        self.published = 0
+        self.summon = 2.0
+        self.premium = False
+        self.bars = len(self.BARS)
+        self.copies = list(self.COPIES)
+        random.shuffle(self.copies)
+
+    def active(self):
+        return self.y > -40
+
+    def move(self, dt, game):
+        if self.y < 225:  # low enough that the crown clears the HUD health bar
+            self.y += 90 * dt
+        else:
+            self.mt += dt * (1.6 if self.premium else 1.0)
+            self.x = W / 2 + math.sin(self.mt * 0.6) * (W / 2 - 150)
+            self.y = 225 + math.sin(self.mt * 2.1) * 10
+        if game.state != "playing" or self.y < 180:
+            return
+        bars = max(1, math.ceil(len(self.BARS) * self.hp / self.maxhp))
+        if bars < self.bars:  # a crown bar falls off
+            self.bars = bars
+            game.explode(self.x, self.y - self.r - 20, colors=[YELLOW, (200, 150, 0), WHITE], n=18, speed=200)
+            game.sfx.play("pop")
+        if not self.premium and self.hp <= self.maxhp / 2:
+            self.premium = True
+            self.name = "MEGA POWER BOO-I PREMIUM"  # HUD only; the class name stays for `seen`
+            self.charge, self.wait = 0.0, 2.0  # dramatic pause while it "upgrades"
+            game.add_float(W / 2, H / 2 + 80, "UPPGRADERAR TILL PREMIUM-KAPACITET!", YELLOW, 40, life=2.4)
+            game.rings.append([self.x, self.y, 20, 420, 0.5, 0.5, YELLOW])
+            game.sfx.play("roar")
+            game.shake = max(game.shake, 12)
+        self.summon -= dt
+        if self.summon <= 0:
+            self.summon = 3.6 if self.premium else 5.0
+            self.publish_copies(game)
+        if self.charge > 0:
+            self.charge += dt / (1.1 if self.premium else 1.6)
+            if self.charge >= 1:
+                self.fire(game)
+        else:
+            self.wait -= dt
+            if self.wait <= 0:
+                self.charge = 0.001
+                game.sfx.play("charge")
+
+    def publish_copies(self, game):
+        t = random.uniform(0, 6)
+        for side in (-1, 0, 1) if self.premium else (-1, 1):
+            c = PowerBooI(self.x + side * 150, self.y + 30)
+            c.t = t  # copies zig-zag in lockstep, so their labels never overlap
+            c.label = self.copies[self.published % len(self.copies)]
+            self.published += 1
+            game.add_enemy(c)
+        game.sfx.play("boo")
+
+    def fire(self, game):
+        self.charge, self.wait = 0.0, random.uniform(0.8, 1.3)
+        game.add_float(self.x, self.y + 100, "Uppdatering misslyckades!", RED, 26, life=1.0)
+        if random.random() < 0.6:  # a fan of falling bar charts, aimed at the player
+            n = 6 if self.premium else 5
+            base = math.atan2(game.player.y - self.y, game.player.x - self.x)
+            for i in range(n):
+                a = base + (i - (n - 1) / 2) * 0.3
+                game.blobs.append(Fireball(self.x, self.y + 40, math.cos(a) * 200, math.sin(a) * 200, style="bar"))
+            game.sfx.play("fireball")
+        else:  # licence errors drift down (can't be shot, dodge them)
+            for i in range(4 if self.premium else 3):
+                game.blobs.append(ErrorBlob(self.x + (i - 1) * 110, self.y + 50, self.ERRORS, YELLOW))
+            game.sfx.play("sneeze")
+        game.shake = max(game.shake, 5)
+
+    def draw(self, s):
+        x, y, t, r = int(self.x), int(self.y), self.t, self.r
+        fl = self.flash > 0
+        blit_glow(s, x, y, 130, (255, 210, 40) if self.premium else YELLOW, 80 if self.premium else 55)
+        bw = 16
+        x0 = x - (self.bars * (bw + 6) - 6) // 2
+        for i, h in enumerate(self.BARS[:self.bars]):  # bar-chart crown, one bar per 20 % HP
+            h = int(h + 4 * math.sin(t * 4 + i))
+            top = y - r - 2 - h
+            pygame.draw.rect(s, (200, 150, 0), (x0 + i * (bw + 6), top, bw, h + 14))
+            pygame.draw.rect(s, (255, 225, 90), (x0 + i * (bw + 6) + 3, top + 3, bw - 6, 6))
+        draw_ghost(s, x, y, r, YELLOW, t, fl)
+        if fl:
+            return
+        cy = y - r * 0.2
+        for side in (-1, 1):  # angry brows
+            pygame.draw.line(s, (90, 60, 0), (x + side * 8, cy - 18), (x + side * 36, cy - 28), 6)
+        if self.charge > 0:
+            draw_loading(s, x, y + r + 26, self.charge, "Uppdaterar datamängd...", YELLOW)
 
 
 # ----------------------------------------------------------------------- game
@@ -1510,7 +1664,7 @@ class Game:
         self.shake = 0.0
         self.banner, self.banner_queue = None, []
         self.score, self.elapsed, self.kills, self.hits = 0, 0.0, 0, 0
-        self.boss_killed, self.name = False, ""
+        self.boss_killed, self.name = [], ""
         self.attract_t = 0.0
         self.new_best, self.rank = False, ""
         self.state, self.state_t = "title", 0.0
@@ -1529,7 +1683,7 @@ class Game:
         self.beam_t = self.assoc_t = self.beam_tick = 0.0
         self.beam_on = self.shield = False
         self.score, self.elapsed, self.kills, self.hits = 0, 0.0, 0, 0
-        self.boss_killed, self.name = False, ""
+        self.boss_killed, self.name = [], ""
         self.spawn_t = 1.0
         self.drop_cool = 0.0
         self.drops_due = list(SCHEDULED_DROPS)
@@ -1689,8 +1843,9 @@ class Game:
             if el >= at and at not in self.trains_sent:
                 self.trains_sent.add(at)
                 self.spawn_train()
-        if el >= BOSS_TIME and self.boss is None:
-            self.spawn_boss()
+        for at, cls in ((MID_BOSS_TIME, Infernomatica), (BOSS_TIME, MegaPowerBooI)):
+            if el >= at and cls.name not in self.seen and (self.boss is None or self.boss.dead):
+                self.spawn_boss(cls)
         for due in list(self.drops_due):
             if el >= due[0]:
                 self.drops_due.remove(due)
@@ -1726,11 +1881,11 @@ class Game:
             self.add_enemy(TrainCar(i, group, phase, amp))
         self.sfx.play("whistle")
 
-    def spawn_boss(self):
-        self.boss = Infernomatica()
+    def spawn_boss(self, cls):
+        self.boss = cls()
         self.seen.add(self.boss.name)
         self.add_enemy(self.boss)
-        self.banner = ["BOSS UPPTÄCKT!", self.boss.name, self.boss.tagline, 3.0, RED, 330]  # below the boss
+        self.banner = [self.boss.header, self.boss.name, self.boss.tagline, 3.0, RED, 330]  # below the boss
         self.sfx.play("roar")
         self.shake = 12
 
@@ -1770,7 +1925,7 @@ class Game:
                 self.sfx.play("explode")
             if bd[2] <= 0:
                 self.explode(bd[0], bd[1], n=140, speed=420)
-                self.rings.append([bd[0], bd[1], 20, 520, 0.7, 0.7, ORANGE])
+                self.rings.append([bd[0], bd[1], 20, 520, 0.7, 0.7, bd[3]])
                 self.sfx.play("boom")
                 self.shake = 20
                 self.boss_dying = None
@@ -1927,13 +2082,13 @@ class Game:
                 self.add_float(W / 2, H / 2, "TÅGKRASCH!  +500", YELLOW, 52, life=2.2)
                 self.sfx.play("bonus")
         if e.boss:
-            self.boss_killed = True
-            self.boss_dying = [e.x, e.y, 1.4]
+            self.boss_killed.append(e.title)
+            self.boss_dying = [e.x, e.y, 1.4, e.glow]
             for bl in self.blobs:
                 bl.dead = True
                 self.explode(bl.x, bl.y, colors=[GREY], n=6, speed=80)
-            self.add_float(W / 2, H / 2 - 40, "INFERNO-MATICA RADERAD!  +%d" % e.points, YELLOW, 46, life=3.0)
-            self.add_float(W / 2, H / 2 + 10, "Laddning klar: 100%", WHITE, 30, life=3.0)
+            self.add_float(W / 2, H / 2 - 40, "%s  +%d" % (e.kill_text, e.points), YELLOW, 46, life=3.0)
+            self.add_float(W / 2, H / 2 + 10, e.kill_sub, WHITE, 30, life=3.0)
             self.sfx.play("roar")
             self.sfx.play("bonus")
             self.shake = 16
@@ -2160,7 +2315,8 @@ class Game:
         draw_text(w, "Monster nedskjutna: %d     Gånger skrämd: %d" % (self.kills, self.hits), 28, WHITE,
                   center=(W / 2, 458))
         if self.boss_killed:
-            draw_text(w, "Inferno-matica besegrad!", 28, ORANGE, center=(W / 2, 486))
+            done = " besegrade!" if len(self.boss_killed) > 1 else " besegrad!"
+            draw_text(w, " + ".join(self.boss_killed) + done, 28, ORANGE, center=(W / 2, 486))
         if self.state_t > 3.0 and int(self.clock * 2) % 2 == 0:
             draw_text(w, "TRYCK PÅ VALFRI KNAPP FÖR ATT SPELA IGEN", 32, YELLOW, center=(W / 2, 530))
 
