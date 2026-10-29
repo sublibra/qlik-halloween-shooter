@@ -5,6 +5,9 @@ A spooky, silly, Qlik-themed 3-button arcade shooter for Raspberry Pi 4.
 
 <img width="1602" height="1201" alt="screenshot" src="https://github.com/user-attachments/assets/1f0c87b2-6cd3-46d9-b4e5-a65222d9a0da" />
 
+Live performance in the office
+<img width="1600" height="1200" alt="Live performance" src="https://github.com/user-attachments/assets/ab0120d2-a137-414d-8571-8c18a435c753" />
+
 
 ## Wiring (Pi 4, 40-pin header)
 
